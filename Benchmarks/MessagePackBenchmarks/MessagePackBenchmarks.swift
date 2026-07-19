@@ -216,6 +216,44 @@ let benchmarks: @Sendable () -> Void = {
         }
     }
 
+    // The serializer route on the same struct fixture: hand-building a
+    // MessagePackValue tree and serializing it (what using the library
+    // without Codable looks like), and the reverse.
+    Benchmark("serializer route encode: structs (1k)") { benchmark in
+        for _ in benchmark.scaledIterations {
+            let tree = MessagePackValue.array(
+                people.map { person in
+                    .map([
+                        .string("id"): .int64(Int64(person.id)),
+                        .string("name"): .string(person.name),
+                        .string("email"): person.email.map { .string($0) } ?? .nil,
+                        .string("isActive"): .bool(person.isActive),
+                        .string("score"): .float64(person.score),
+                        .string("tags"): .array(person.tags.map { .string($0) }),
+                    ])
+                })
+            blackHole(try MessagePackSerializer.serialize(value: tree))
+        }
+    }
+
+    Benchmark("serializer route decode: structs (1k)") { benchmark in
+        for _ in benchmark.scaledIterations {
+            let tree = try MessagePackSerializer.deserialize(data: peopleMsgPackData)
+            let decoded = tree.arrayValue!.map { entry -> Person in
+                let map = entry.mapValue!
+                return Person(
+                    id: Int(map[.string("id")]!.int64Value!),
+                    name: map[.string("name")]!.stringValue!,
+                    email: map[.string("email")].flatMap(\.stringValue),
+                    isActive: map[.string("isActive")]!.boolValue!,
+                    score: map[.string("score")]!.doubleValue!,
+                    tags: map[.string("tags")]!.arrayValue!.map { $0.stringValue! }
+                )
+            }
+            blackHole(decoded)
+        }
+    }
+
     // Reference points: Foundation JSON coders on the same fixtures.
     Benchmark("reference JSONEncoder: structs (1k)") { benchmark in
         let encoder = JSONEncoder()
