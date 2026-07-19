@@ -91,6 +91,8 @@ extension MessagePackFormatSink {
                 writeByte(0xda)
                 writeBigEndian(UInt16(truncatingIfNeeded: length))
             } else {
+                precondition(
+                    length <= 0xffff_ffff, "MessagePack strings are limited to 2^32-1 bytes")
                 writeByte(0xdb)
                 writeBigEndian(UInt32(truncatingIfNeeded: length))
             }
@@ -110,6 +112,7 @@ extension MessagePackFormatSink {
             writeByte(0xc5)
             writeBigEndian(UInt16(truncatingIfNeeded: length))
         } else {
+            precondition(length <= 0xffff_ffff, "MessagePack binary is limited to 2^32-1 bytes")
             writeByte(0xc6)
             writeBigEndian(UInt32(truncatingIfNeeded: length))
         }
@@ -137,6 +140,8 @@ extension MessagePackFormatSink {
                 writeByte(0xc8)
                 writeBigEndian(UInt16(truncatingIfNeeded: length))
             } else {
+                precondition(
+                    length <= 0xffff_ffff, "MessagePack ext payloads are limited to 2^32-1 bytes")
                 writeByte(0xc9)
                 writeBigEndian(UInt32(truncatingIfNeeded: length))
             }
@@ -157,6 +162,7 @@ extension MessagePackFormatSink {
             writeByte(0xdc)
             writeBigEndian(UInt16(truncatingIfNeeded: count))
         } else {
+            precondition(count <= 0xffff_ffff, "MessagePack arrays are limited to 2^32-1 elements")
             writeByte(0xdd)
             writeBigEndian(UInt32(truncatingIfNeeded: count))
         }
@@ -170,6 +176,7 @@ extension MessagePackFormatSink {
             writeByte(0xde)
             writeBigEndian(UInt16(truncatingIfNeeded: count))
         } else {
+            precondition(count <= 0xffff_ffff, "MessagePack maps are limited to 2^32-1 entries")
             writeByte(0xdf)
             writeBigEndian(UInt32(truncatingIfNeeded: count))
         }

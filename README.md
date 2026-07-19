@@ -37,11 +37,26 @@ let person = try MessagePackDecoder().decode(Person.self, from: data)
   can be decoded through `CodingKey.intValue`.
 - `Date` ↔ the spec's timestamp extension (ext type -1; numeric seconds are
   also accepted when decoding), `Data` ↔ bin 8/16/32, and
-  `MessagePackTimestamp` ↔ ext type -1.
+  `MessagePackTimestamp` ↔ ext type -1. Dates that cannot be represented as
+  a timestamp (non-finite, out of `Int64` seconds range) throw
+  `EncodingError.invalidValue`.
 - Integers encode with the smallest wire format and decode from any integer
-  format that fits the requested type.
+  format that fits the requested type; out-of-range numbers (including
+  float64 → `Float` overflow) throw instead of truncating.
 - Encoder output is byte-identical to `MessagePackSerializer.serialize` of
   the equivalent value tree (smallest headers everywhere).
+- Both coders are `Sendable` (unchecked, value-semantic — like
+  `JSONEncoder`, values placed in `userInfo` must be `Sendable` for
+  cross-task use).
+- Codable edge cases behave like `JSONEncoder`/`JSONDecoder`: repeated
+  `container(keyedBy:)` requests merge into one map, a `superEncoder()`
+  that is never used contributes nothing (its entry is written lazily on
+  first use), `superDecoder()` for a missing key decodes as nil, and a
+  value that encodes nothing throws. Because encoding is streaming, writes
+  must be well nested — out-of-order writes to an already-closed container
+  trap with a precondition failure instead of corrupting output. Decoding
+  enforces a nesting-depth limit (128) against hostile input driving
+  recursive `Decodable` types.
 
 ### Codable performance
 
@@ -66,9 +81,9 @@ p50 wall clock, same machine as below, 1k-element array of a 6-field struct:
 
 | Workload | MessagePackEncoder/Decoder | Foundation JSONEncoder/Decoder |
 |---|---|---|
-| encode structs (1k) | 784 µs | 1.69 ms |
-| decode structs (1k) | 1.58 ms | 2.30 ms |
-| encode int array (10k) | 1.19 ms | — |
+| encode structs (1k) | 814 µs | 1.69 ms |
+| decode structs (1k) | 1.53 ms | 2.30 ms |
+| encode int array (10k) | 1.23 ms | — |
 | decode int array (10k) | 1.61 ms | — |
 
 ## Design notes
@@ -109,4 +124,4 @@ Serialization performs 4 allocations total for flat payloads of any size (size-p
 swift test
 ```
 
-102 tests cover every format's byte-level encoding, boundary values (fixint/str/bin/array/map size class edges), Unicode, error paths (truncation, reserved bytes, invalid UTF-8, trailing bytes, depth limit), round-trip fidelity, and the Codable layer (scalar extremes, nested/optional/enum/dictionary round trips, serializer interop, class inheritance via `superEncoder`, manual keyed/unkeyed/nested containers, and decoding errors).
+114 tests cover every format's byte-level encoding, boundary values (fixint/str/bin/array/map size class edges), Unicode, error paths (truncation, reserved bytes, invalid UTF-8, trailing bytes, depth limit), round-trip fidelity, and the Codable layer (scalar extremes, nested/optional/enum/dictionary round trips, serializer interop, class inheritance via `superEncoder`, manual keyed/unkeyed/nested containers, and decoding errors).

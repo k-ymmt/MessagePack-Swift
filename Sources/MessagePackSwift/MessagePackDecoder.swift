@@ -44,6 +44,8 @@ public struct MessagePackDecoder {
     }
 }
 
+extension MessagePackDecoder: @unchecked Sendable {}
+
 // MARK: - Shared decoding state
 
 /// Immutable state shared by every decoder and container of one `decode`
@@ -97,6 +99,13 @@ enum MessagePackDecodeFailure: Error {
 /// Namespace for the typed decode primitives shared by all containers.
 enum MessagePackDecoding {
     typealias Parser = MessagePackSerializer.Parser
+
+    /// Maximum container nesting depth while decoding. Deliberately lower
+    /// than the serializer's iterative `maxDepth`: Codable decoding recurses
+    /// through user types' `init(from:)`, and concurrency-pool threads have
+    /// small (512 KB) stacks, so hostile deeply-nested input must be
+    /// rejected well before the stack runs out.
+    static let maxDepth = 128
 
     static func corrupted(_ error: MessagePackError, _ path: [CodingKey]) -> DecodingError {
         .dataCorrupted(
@@ -220,7 +229,14 @@ enum MessagePackDecoding {
 
     @inline(__always)
     static func float(_ parser: inout Parser) throws(MessagePackDecodeFailure) -> Float {
-        Float(try double(&parser))
+        let value = try double(&parser)
+        let narrowed = Float(value)
+        // A finite float64 must stay finite as Float; JSONDecoder likewise
+        // rejects numbers that do not fit the requested type.
+        if narrowed.isInfinite && value.isFinite {
+            throw .invalid("Number \(value) does not fit in Float")
+        }
+        return narrowed
     }
 
     @inline(__always)
@@ -275,10 +291,15 @@ enum MessagePackDecoding {
         context: MessagePackDecodingContext,
         codingPath: [CodingKey]
     ) throws -> T {
+        // On failure the parser is rewound to the value start, so callers
+        // that catch and retry (or an unkeyed container's cursor) never
+        // desync from the element boundary.
+        let startOffset = parser.offset
         if type == Date.self {
             do throws(MessagePackDecodeFailure) {
                 return try date(&parser) as! T
             } catch {
+                parser.offset = startOffset
                 throw decodingError(error, type: type, parser: parser, path: codingPath)
             }
         }
@@ -286,6 +307,7 @@ enum MessagePackDecoding {
             do throws(MessagePackDecodeFailure) {
                 return try binary(&parser) as! T
             } catch {
+                parser.offset = startOffset
                 throw decodingError(error, type: type, parser: parser, path: codingPath)
             }
         }
@@ -293,10 +315,10 @@ enum MessagePackDecoding {
             do throws(MessagePackDecodeFailure) {
                 return try timestamp(&parser) as! T
             } catch {
+                parser.offset = startOffset
                 throw decodingError(error, type: type, parser: parser, path: codingPath)
             }
         }
-        let startOffset = parser.offset
         let impl = MessagePackDecoderImpl(
             context: context, offset: startOffset, codingPath: codingPath)
         let value = try type.init(from: impl)
@@ -322,7 +344,18 @@ struct MessagePackDecoderImpl: Decoder, SingleValueDecodingContainer {
 
     var userInfo: [CodingUserInfoKey: Any] { context.userInfo }
 
+    /// Guards against unbounded recursion through recursive `Decodable`
+    /// types fed deeply nested hostile input. Every nesting level appends to
+    /// `codingPath`, so its length tracks the container depth (mirroring the
+    /// serializer's `maxDepth` protection).
+    private func checkDepth() throws {
+        guard codingPath.count < MessagePackDecoding.maxDepth else {
+            throw MessagePackDecoding.corrupted(.depthLimitExceeded, codingPath)
+        }
+    }
+
     func container<Key: CodingKey>(keyedBy type: Key.Type) throws -> KeyedDecodingContainer<Key> {
+        try checkDepth()
         var parser = context.parser(at: offset)
         let entryCount: Int?
         do throws(MessagePackError) {
@@ -354,6 +387,7 @@ struct MessagePackDecoderImpl: Decoder, SingleValueDecodingContainer {
     }
 
     func unkeyedContainer() throws -> UnkeyedDecodingContainer {
+        try checkDepth()
         var parser = context.parser(at: offset)
         let elementCount: Int?
         do throws(MessagePackError) {
@@ -500,7 +534,11 @@ struct MessagePackKeyedDecodingContainer<Key: CodingKey>: KeyedDecodingContainer
                 let entry = entries[index]
                 index += 1
                 if matches(keyBytes: keyBytes, intValue: intValue, at: entry.keyOffset) {
-                    storage.searchIndex = index
+                    // Remember the match itself (not the next entry): the
+                    // default decodeIfPresent looks the same key up three
+                    // times (contains → decodeNil → decode), and this keeps
+                    // repeats O(1) while sequential access stays O(1).
+                    storage.searchIndex = index - 1
                     return entry.valueOffset
                 }
             }
@@ -655,23 +693,78 @@ struct MessagePackKeyedDecodingContainer<Key: CodingKey>: KeyedDecodingContainer
         return try impl.unkeyedContainer()
     }
 
-    func superDecoder() throws -> Decoder {
-        let superKey = MessagePackCodingKey.super
-        guard let offset = valueOffset(stringValue: superKey.stringValue, intValue: nil) else {
-            throw DecodingError.keyNotFound(
-                superKey,
-                DecodingError.Context(
-                    codingPath: codingPath,
-                    debugDescription: "No value associated with key \"super\""
-                ))
+    /// Mirroring `JSONDecoder`, a missing entry yields a decoder positioned
+    /// on a nil value rather than throwing `keyNotFound`.
+    private func superDecoder(stringValue: String, intValue: Int?, key: CodingKey) -> Decoder {
+        guard let offset = valueOffset(stringValue: stringValue, intValue: intValue) else {
+            return MessagePackNilDecoder(
+                codingPath: codingPath + [key], userInfo: context.userInfo)
         }
         return MessagePackDecoderImpl(
-            context: context, offset: offset, codingPath: codingPath + [superKey])
+            context: context, offset: offset, codingPath: codingPath + [key])
+    }
+
+    func superDecoder() throws -> Decoder {
+        let superKey = MessagePackCodingKey.super
+        return superDecoder(stringValue: superKey.stringValue, intValue: nil, key: superKey)
     }
 
     func superDecoder(forKey key: Key) throws -> Decoder {
-        MessagePackDecoderImpl(
-            context: context, offset: try requireOffset(key), codingPath: codingPath + [key])
+        superDecoder(stringValue: key.stringValue, intValue: key.intValue, key: key)
+    }
+}
+
+// MARK: - Nil decoder
+
+/// Decoder representing an absent value, returned by `superDecoder()` when
+/// the wire map has no matching entry (`JSONDecoder` behaves the same way,
+/// treating the missing entry as null).
+struct MessagePackNilDecoder: Decoder, SingleValueDecodingContainer {
+    let codingPath: [CodingKey]
+    let userInfo: [CodingUserInfoKey: Any]
+
+    private func valueNotFound(_ type: Any.Type) -> DecodingError {
+        .valueNotFound(
+            type,
+            DecodingError.Context(
+                codingPath: codingPath,
+                debugDescription: "Cannot decode \(type) -- found nil value instead"
+            ))
+    }
+
+    func container<Key: CodingKey>(keyedBy type: Key.Type) throws -> KeyedDecodingContainer<Key> {
+        throw valueNotFound(KeyedDecodingContainer<Key>.self)
+    }
+
+    func unkeyedContainer() throws -> UnkeyedDecodingContainer {
+        throw valueNotFound(UnkeyedDecodingContainer.self)
+    }
+
+    func singleValueContainer() throws -> SingleValueDecodingContainer {
+        self
+    }
+
+    func decodeNil() -> Bool { true }
+
+    func decode(_ type: Bool.Type) throws -> Bool { throw valueNotFound(type) }
+    func decode(_ type: String.Type) throws -> String { throw valueNotFound(type) }
+    func decode(_ type: Double.Type) throws -> Double { throw valueNotFound(type) }
+    func decode(_ type: Float.Type) throws -> Float { throw valueNotFound(type) }
+    func decode(_ type: Int.Type) throws -> Int { throw valueNotFound(type) }
+    func decode(_ type: Int8.Type) throws -> Int8 { throw valueNotFound(type) }
+    func decode(_ type: Int16.Type) throws -> Int16 { throw valueNotFound(type) }
+    func decode(_ type: Int32.Type) throws -> Int32 { throw valueNotFound(type) }
+    func decode(_ type: Int64.Type) throws -> Int64 { throw valueNotFound(type) }
+    func decode(_ type: UInt.Type) throws -> UInt { throw valueNotFound(type) }
+    func decode(_ type: UInt8.Type) throws -> UInt8 { throw valueNotFound(type) }
+    func decode(_ type: UInt16.Type) throws -> UInt16 { throw valueNotFound(type) }
+    func decode(_ type: UInt32.Type) throws -> UInt32 { throw valueNotFound(type) }
+    func decode(_ type: UInt64.Type) throws -> UInt64 { throw valueNotFound(type) }
+
+    func decode<T: Decodable>(_ type: T.Type) throws -> T {
+        // Lets Optional<T> decode as nil via its own conformance; anything
+        // else fails with valueNotFound from the container requests above.
+        try T(from: self)
     }
 }
 
@@ -727,11 +820,16 @@ struct MessagePackUnkeyedDecodingContainer: UnkeyedDecodingContainer {
         _ read: (inout MessagePackDecoding.Parser) throws(MessagePackDecodeFailure) -> T
     ) throws -> T {
         try checkEnd(type)
+        // On failure, rewind to the element start so the cursor stays in
+        // sync with `currentIndex` — callers may catch the error and retry
+        // with a different type (`try? decode(A.self)` fallback patterns).
+        let elementStart = parser.offset
         do throws(MessagePackDecodeFailure) {
             let value = try read(&parser)
             advanceIndex()
             return value
         } catch {
+            parser.offset = elementStart
             throw MessagePackDecoding.decodingError(
                 error, type: type, parser: parser,
                 path: codingPath + [MessagePackCodingKey(index: currentIndex)])

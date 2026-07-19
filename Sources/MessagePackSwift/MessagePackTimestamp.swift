@@ -112,12 +112,29 @@ extension MessagePackTimestamp: Codable {
 
 extension MessagePackTimestamp {
     /// Creates a timestamp from a `Date`, rounding to nanosecond precision.
+    /// Traps if the date is not representable (non-finite or out of the
+    /// `Int64` seconds range); use ``init(exactly:)`` to handle that case
+    /// gracefully.
     public init(date: Date) {
+        guard let timestamp = MessagePackTimestamp(exactly: date) else {
+            preconditionFailure(
+                "Date (timeIntervalSince1970: \(date.timeIntervalSince1970)) is not representable as a MessagePack timestamp"
+            )
+        }
+        self = timestamp
+    }
+
+    /// Creates a timestamp from a `Date`, rounding to nanosecond precision,
+    /// or returns nil when the date's interval since 1970 is not finite or
+    /// does not fit in the timestamp's `Int64` seconds range.
+    public init?(exactly date: Date) {
         let interval = date.timeIntervalSince1970
+        guard interval.isFinite else { return nil }
         let wholeSeconds = interval.rounded(.down)
-        var seconds = Int64(wholeSeconds)
+        guard var seconds = Int64(exactly: wholeSeconds) else { return nil }
         var nanoseconds = Int64(((interval - wholeSeconds) * 1_000_000_000).rounded())
         if nanoseconds >= 1_000_000_000 {
+            guard seconds < Int64.max else { return nil }
             seconds += 1
             nanoseconds -= 1_000_000_000
         }
