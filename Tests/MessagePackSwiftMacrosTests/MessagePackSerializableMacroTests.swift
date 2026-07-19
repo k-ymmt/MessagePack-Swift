@@ -29,10 +29,9 @@ final class MessagePackSerializableMacroTests: XCTestCase {
 
                 extension Foo {
                     func serialize(into writer: inout MessagePackSwift.MessagePackWriter) {
-                        writer.writeMapHeader(count: 2)
-                        writer.writeKey("bar")
+                        writer.writeRaw(0x72_6162_a382, count: 5) // key "bar"
                         self.`bar`.serialize(into: &writer)
-                        writer.writeKey("hoge")
+                        writer.writeRaw(0x65_676f_68a4, count: 5) // key "hoge"
                         self.`hoge`.serialize(into: &writer)
                     }
 
@@ -42,13 +41,20 @@ final class MessagePackSerializableMacroTests: XCTestCase {
                         let _msgpackEntryCount = try reader.readMapHeader()
                         for _ in 0 ..< _msgpackEntryCount {
                             switch try reader.readKey(matchedBy: { _msgpackKey in
-                                if MessagePackSwift.MessagePackReader.key(_msgpackKey, matches: "bar") {
-                                    return 0
+                                switch _msgpackKey.count {
+                                case 3:
+                                    if MessagePackSwift.MessagePackReader.keyChunk(_msgpackKey, offset: 0, count: 3) == 0x72_6162 {
+                                        return 0
+                                    }
+                                    return nil
+                                case 4:
+                                    if MessagePackSwift.MessagePackReader.keyChunk(_msgpackKey, offset: 0, count: 4) == 0x6567_6f68 {
+                                        return 1
+                                    }
+                                    return nil
+                                default:
+                                    return nil
                                 }
-                                if MessagePackSwift.MessagePackReader.key(_msgpackKey, matches: "hoge") {
-                                    return 1
-                                }
-                                return nil
                             }) {
                             case 0:
                                 _msgpack_bar = .some(try Int(messagePack: &reader))
@@ -93,10 +99,9 @@ final class MessagePackSerializableMacroTests: XCTestCase {
 
                 extension Foo {
                     func serialize(into writer: inout MessagePackSwift.MessagePackWriter) {
-                        writer.writeMapHeader(count: 2)
-                        writer.writeKey("name")
+                        writer.writeRaw(0x656d_616e_a482, count: 6) // key "name"
                         self.`name`.serialize(into: &writer)
-                        writer.writeKey("count")
+                        writer.writeRaw(0x746e_756f_63a5, count: 6) // key "count"
                         self.`count`.serialize(into: &writer)
                     }
 
@@ -106,13 +111,20 @@ final class MessagePackSerializableMacroTests: XCTestCase {
                         let _msgpackEntryCount = try reader.readMapHeader()
                         for _ in 0 ..< _msgpackEntryCount {
                             switch try reader.readKey(matchedBy: { _msgpackKey in
-                                if MessagePackSwift.MessagePackReader.key(_msgpackKey, matches: "name") {
-                                    return 0
+                                switch _msgpackKey.count {
+                                case 4:
+                                    if MessagePackSwift.MessagePackReader.keyChunk(_msgpackKey, offset: 0, count: 4) == 0x656d_616e {
+                                        return 0
+                                    }
+                                    return nil
+                                case 5:
+                                    if MessagePackSwift.MessagePackReader.keyChunk(_msgpackKey, offset: 0, count: 5) == 0x74_6e75_6f63 {
+                                        return 1
+                                    }
+                                    return nil
+                                default:
+                                    return nil
                                 }
-                                if MessagePackSwift.MessagePackReader.key(_msgpackKey, matches: "count") {
-                                    return 1
-                                }
-                                return nil
                             }) {
                             case 0:
                                 _msgpack_name = .some(try Optional<String>(messagePack: &reader))
@@ -151,10 +163,9 @@ final class MessagePackSerializableMacroTests: XCTestCase {
 
                 extension Foo {
                     func serialize(into writer: inout MessagePackSwift.MessagePackWriter) {
-                        writer.writeMapHeader(count: 2)
-                        writer.writeKey("n")
+                        writer.writeRaw(0x6e_a182, count: 3) // key "n"
                         self.`name`.serialize(into: &writer)
-                        writer.writeKey("version")
+                        writer.writeRaw(0x6e6f_6973_7265_76a7, count: 8) // key "version"
                         self.`version`.serialize(into: &writer)
                     }
 
@@ -163,10 +174,15 @@ final class MessagePackSerializableMacroTests: XCTestCase {
                         let _msgpackEntryCount = try reader.readMapHeader()
                         for _ in 0 ..< _msgpackEntryCount {
                             switch try reader.readKey(matchedBy: { _msgpackKey in
-                                if MessagePackSwift.MessagePackReader.key(_msgpackKey, matches: "n") {
-                                    return 0
+                                switch _msgpackKey.count {
+                                case 1:
+                                    if MessagePackSwift.MessagePackReader.keyChunk(_msgpackKey, offset: 0, count: 1) == 0x6e {
+                                        return 0
+                                    }
+                                    return nil
+                                default:
+                                    return nil
                                 }
-                                return nil
                             }) {
                             case 0:
                                 _msgpack_name = .some(try String(messagePack: &reader))
@@ -204,10 +220,9 @@ final class MessagePackSerializableMacroTests: XCTestCase {
 
                 extension Pair where A: MessagePackSwift.MessagePackSerializable, B: MessagePackSwift.MessagePackSerializable {
                     func serialize(into writer: inout MessagePackSwift.MessagePackWriter) {
-                        writer.writeMapHeader(count: 2)
-                        writer.writeKey("first")
+                        writer.writeRaw(0x74_7372_6966_a582, count: 7) // key "first"
                         self.`first`.serialize(into: &writer)
-                        writer.writeKey("second")
+                        writer.writeRaw(0x64_6e6f_6365_73a6, count: 7) // key "second"
                         self.`second`.serialize(into: &writer)
                     }
 
@@ -217,13 +232,20 @@ final class MessagePackSerializableMacroTests: XCTestCase {
                         let _msgpackEntryCount = try reader.readMapHeader()
                         for _ in 0 ..< _msgpackEntryCount {
                             switch try reader.readKey(matchedBy: { _msgpackKey in
-                                if MessagePackSwift.MessagePackReader.key(_msgpackKey, matches: "first") {
-                                    return 0
+                                switch _msgpackKey.count {
+                                case 5:
+                                    if MessagePackSwift.MessagePackReader.keyChunk(_msgpackKey, offset: 0, count: 5) == 0x74_7372_6966 {
+                                        return 0
+                                    }
+                                    return nil
+                                case 6:
+                                    if MessagePackSwift.MessagePackReader.keyChunk(_msgpackKey, offset: 0, count: 6) == 0x646e_6f63_6573 {
+                                        return 1
+                                    }
+                                    return nil
+                                default:
+                                    return nil
                                 }
-                                if MessagePackSwift.MessagePackReader.key(_msgpackKey, matches: "second") {
-                                    return 1
-                                }
-                                return nil
                             }) {
                             case 0:
                                 _msgpack_first = .some(try A(messagePack: &reader))
@@ -266,8 +288,7 @@ final class MessagePackSerializableMacroTests: XCTestCase {
 
                 extension Solo {
                     public func serialize(into writer: inout MessagePackSwift.MessagePackWriter) {
-                        writer.writeMapHeader(count: 1)
-                        writer.writeKey("a")
+                        writer.writeRaw(0x61_a181, count: 3) // key "a"
                         self.`a`.serialize(into: &writer)
                     }
 
@@ -276,10 +297,15 @@ final class MessagePackSerializableMacroTests: XCTestCase {
                         let _msgpackEntryCount = try reader.readMapHeader()
                         for _ in 0 ..< _msgpackEntryCount {
                             switch try reader.readKey(matchedBy: { _msgpackKey in
-                                if MessagePackSwift.MessagePackReader.key(_msgpackKey, matches: "a") {
-                                    return 0
+                                switch _msgpackKey.count {
+                                case 1:
+                                    if MessagePackSwift.MessagePackReader.keyChunk(_msgpackKey, offset: 0, count: 1) == 0x61 {
+                                        return 0
+                                    }
+                                    return nil
+                                default:
+                                    return nil
                                 }
-                                return nil
                             }) {
                             case 0:
                                 _msgpack_a = .some(try Int(messagePack: &reader))
@@ -311,7 +337,7 @@ final class MessagePackSerializableMacroTests: XCTestCase {
 
                 extension Empty {
                     func serialize(into writer: inout MessagePackSwift.MessagePackWriter) {
-                        writer.writeMapHeader(count: 0)
+                        writer.writeRaw(0x80, count: 1)
                     }
 
                     init(messagePack reader: inout MessagePackSwift.MessagePackReader) throws(MessagePackSwift.MessagePackError) {
@@ -321,6 +347,113 @@ final class MessagePackSerializableMacroTests: XCTestCase {
                             try reader.skipValue()
                         }
                         reader.endContainer()
+                    }
+                }
+                """,
+            macros: testMacros
+        )
+    }
+
+    /// Keys sharing their first 8 (and 16) bytes force the matcher to branch
+    /// on second and third chunks, and same-length distinct keys share one
+    /// length case with a chunk-value switch.
+    func testSharedPrefixKeysBuildChunkTrie() {
+        assertMacroExpansion(
+            """
+            @MessagePackSerializable
+            struct Trie {
+                var sharedPrefixAlpha: Int
+                var sharedPrefixBeta: Int
+                var sharedPrefixGamma: Int
+            }
+            """,
+            expandedSource: """
+                struct Trie {
+                    var sharedPrefixAlpha: Int
+                    var sharedPrefixBeta: Int
+                    var sharedPrefixGamma: Int
+                }
+
+                extension Trie {
+                    func serialize(into writer: inout MessagePackSwift.MessagePackWriter) {
+                        writer.writeRaw(0x6465_7261_6873_b183, count: 8) // key "sharedPrefixAlpha"
+                        writer.writeRaw(0x6c41_7869_6665_7250, count: 8)
+                        writer.writeRaw(0x61_6870, count: 3)
+                        self.`sharedPrefixAlpha`.serialize(into: &writer)
+                        writer.writeRaw(0x5064_6572_6168_73b0, count: 8) // key "sharedPrefixBeta"
+                        writer.writeRaw(0x7465_4278_6966_6572, count: 8)
+                        writer.writeRaw(0x61, count: 1)
+                        self.`sharedPrefixBeta`.serialize(into: &writer)
+                        writer.writeRaw(0x5064_6572_6168_73b1, count: 8) // key "sharedPrefixGamma"
+                        writer.writeRaw(0x6d61_4778_6966_6572, count: 8)
+                        writer.writeRaw(0x616d, count: 2)
+                        self.`sharedPrefixGamma`.serialize(into: &writer)
+                    }
+
+                    init(messagePack reader: inout MessagePackSwift.MessagePackReader) throws(MessagePackSwift.MessagePackError) {
+                        var _msgpack_sharedPrefixAlpha: Optional<Int> = nil
+                        var _msgpack_sharedPrefixBeta: Optional<Int> = nil
+                        var _msgpack_sharedPrefixGamma: Optional<Int> = nil
+                        let _msgpackEntryCount = try reader.readMapHeader()
+                        for _ in 0 ..< _msgpackEntryCount {
+                            switch try reader.readKey(matchedBy: { _msgpackKey in
+                                switch _msgpackKey.count {
+                                case 16:
+                                    if MessagePackSwift.MessagePackReader.keyChunk(_msgpackKey, offset: 0, count: 8) == 0x7250_6465_7261_6873
+                                        && MessagePackSwift.MessagePackReader.keyChunk(_msgpackKey, offset: 8, count: 8) == 0x6174_6542_7869_6665 {
+                                        return 1
+                                    }
+                                    return nil
+                                case 17:
+                                    switch MessagePackSwift.MessagePackReader.keyChunk(_msgpackKey, offset: 0, count: 8) {
+                                    case 0x7250_6465_7261_6873:
+                                        switch MessagePackSwift.MessagePackReader.keyChunk(_msgpackKey, offset: 8, count: 8) {
+                                        case 0x6870_6c41_7869_6665:
+                                            if MessagePackSwift.MessagePackReader.keyChunk(_msgpackKey, offset: 16, count: 1) == 0x61 {
+                                                return 0
+                                            }
+                                            return nil
+                                        case 0x6d6d_6147_7869_6665:
+                                            if MessagePackSwift.MessagePackReader.keyChunk(_msgpackKey, offset: 16, count: 1) == 0x61 {
+                                                return 2
+                                            }
+                                            return nil
+                                        default:
+                                            return nil
+                                        }
+                                    default:
+                                        return nil
+                                    }
+                                default:
+                                    return nil
+                                }
+                            }) {
+                            case 0:
+                                _msgpack_sharedPrefixAlpha = .some(try Int(messagePack: &reader))
+                            case 1:
+                                _msgpack_sharedPrefixBeta = .some(try Int(messagePack: &reader))
+                            case 2:
+                                _msgpack_sharedPrefixGamma = .some(try Int(messagePack: &reader))
+                            default:
+                                try reader.skipValue()
+                            }
+                        }
+                        reader.endContainer()
+                        if let value = _msgpack_sharedPrefixAlpha {
+                            self.`sharedPrefixAlpha` = value
+                        } else {
+                            throw MessagePackSwift.MessagePackError.missingField("sharedPrefixAlpha")
+                        }
+                        if let value = _msgpack_sharedPrefixBeta {
+                            self.`sharedPrefixBeta` = value
+                        } else {
+                            throw MessagePackSwift.MessagePackError.missingField("sharedPrefixBeta")
+                        }
+                        if let value = _msgpack_sharedPrefixGamma {
+                            self.`sharedPrefixGamma` = value
+                        } else {
+                            throw MessagePackSwift.MessagePackError.missingField("sharedPrefixGamma")
+                        }
                     }
                 }
                 """,
@@ -484,8 +617,7 @@ final class MessagePackSerializableMacroTests: XCTestCase {
 
                 extension Foo {
                     func serialize(into writer: inout MessagePackSwift.MessagePackWriter) {
-                        writer.writeMapHeader(count: 1)
-                        writer.writeKey("kept")
+                        writer.writeRaw(0x7470_656b_a481, count: 6) // key "kept"
                         self.`kept`.serialize(into: &writer)
                     }
 
@@ -494,10 +626,15 @@ final class MessagePackSerializableMacroTests: XCTestCase {
                         let _msgpackEntryCount = try reader.readMapHeader()
                         for _ in 0 ..< _msgpackEntryCount {
                             switch try reader.readKey(matchedBy: { _msgpackKey in
-                                if MessagePackSwift.MessagePackReader.key(_msgpackKey, matches: "kept") {
-                                    return 0
+                                switch _msgpackKey.count {
+                                case 4:
+                                    if MessagePackSwift.MessagePackReader.keyChunk(_msgpackKey, offset: 0, count: 4) == 0x7470_656b {
+                                        return 0
+                                    }
+                                    return nil
+                                default:
+                                    return nil
                                 }
-                                return nil
                             }) {
                             case 0:
                                 _msgpack_kept = .some(try Int(messagePack: &reader))

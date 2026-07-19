@@ -116,6 +116,20 @@ public struct MessagePackWriter: ~Copyable {
         }
     }
 
+    /// Writes `count` wire bytes packed little-endian into `word` (the first
+    /// wire byte in the least significant position; bytes above `count` must
+    /// be zero). Generated `serialize(into:)` implementations use this to
+    /// emit a map header and precomputed field-name strings as a single
+    /// 8-byte store instead of a header branch and a byte copy per key.
+    /// `count` must be 1...8.
+    @inlinable
+    public mutating func writeRaw(_ word: UInt64, count: Int) {
+        assert(count >= 1 && count <= 8)
+        buffer.ensure(8)
+        buffer.base.storeBytes(of: word.littleEndian, toByteOffset: buffer.offset, as: UInt64.self)
+        buffer.offset += count
+    }
+
     // MARK: Containers and extensions
 
     /// Writes an array header. Exactly `count` values must be written after it.

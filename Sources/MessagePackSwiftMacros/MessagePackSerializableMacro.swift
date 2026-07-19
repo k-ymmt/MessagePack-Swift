@@ -173,13 +173,87 @@ public struct MessagePackSerializableMacro: ExtensionMacro {
     private static func serializeMethod(fields: [Field], access: String) -> String {
         var lines: [String] = []
         lines.append("\(access)func serialize(into writer: inout MessagePackSwift.MessagePackWriter) {")
-        lines.append("    writer.writeMapHeader(count: \(fields.count))")
+        // The map header and every key are known at expansion time, so they
+        // are emitted as precomputed wire bytes: the header merges with the
+        // first key, and each run is written 8 bytes per store.
+        var pending = mapHeaderBytes(count: fields.count)
         for field in fields {
-            lines.append("    writer.writeKey(\(literal(field.key)))")
+            pending += keyBytes(field.key)
+            lines.append(contentsOf: writeRawLines(pending, comment: literal(field.key)))
+            pending = []
             lines.append("    self.`\(field.name)`.serialize(into: &writer)")
+        }
+        if !pending.isEmpty {
+            lines.append(contentsOf: writeRawLines(pending, comment: nil))
         }
         lines.append("}")
         return lines.map { "    \($0)" }.joined(separator: "\n")
+    }
+
+    /// The exact wire bytes ``MessagePackWriter/writeMapHeader(count:)``
+    /// emits (fixmap / map 16 / map 32).
+    private static func mapHeaderBytes(count: Int) -> [UInt8] {
+        if count < 16 {
+            return [0x80 | UInt8(count)]
+        }
+        if count <= 0xffff {
+            return [0xde, UInt8(count >> 8), UInt8(count & 0xff)]
+        }
+        return [
+            0xdf,
+            UInt8((count >> 24) & 0xff), UInt8((count >> 16) & 0xff),
+            UInt8((count >> 8) & 0xff), UInt8(count & 0xff),
+        ]
+    }
+
+    /// The exact wire bytes ``MessagePackWriter/writeKey(_:)`` emits: the
+    /// smallest string header followed by the key's UTF-8.
+    private static func keyBytes(_ key: String) -> [UInt8] {
+        let utf8 = Array(key.utf8)
+        var bytes: [UInt8]
+        if utf8.count < 32 {
+            bytes = [0xa0 | UInt8(utf8.count)]
+        } else if utf8.count <= 0xff {
+            bytes = [0xd9, UInt8(utf8.count)]
+        } else if utf8.count <= 0xffff {
+            bytes = [0xda, UInt8(utf8.count >> 8), UInt8(utf8.count & 0xff)]
+        } else {
+            bytes = [
+                0xdb,
+                UInt8((utf8.count >> 24) & 0xff), UInt8((utf8.count >> 16) & 0xff),
+                UInt8((utf8.count >> 8) & 0xff), UInt8(utf8.count & 0xff),
+            ]
+        }
+        bytes += utf8
+        return bytes
+    }
+
+    /// `writer.writeRaw` calls emitting `bytes` verbatim, packed
+    /// little-endian 8 bytes per call. `comment` (an escaped key literal)
+    /// documents which key the run writes.
+    private static func writeRawLines(_ bytes: [UInt8], comment: String?) -> [String] {
+        stride(from: 0, to: bytes.count, by: 8).map { start in
+            let chunk = bytes[start..<min(start + 8, bytes.count)]
+            var word: UInt64 = 0
+            for (index, byte) in chunk.enumerated() {
+                word |= UInt64(byte) << (index * 8)
+            }
+            let suffix = start == 0 ? comment.map { " // key \($0)" } ?? "" : ""
+            return "    writer.writeRaw(\(hexLiteral(word)), count: \(chunk.count))\(suffix)"
+        }
+    }
+
+    /// Renders `value` as a hex literal grouped in 4-digit clusters.
+    private static func hexLiteral(_ value: UInt64) -> String {
+        let digits = Array(String(value, radix: 16))
+        var groups: [String] = []
+        var index = digits.count
+        while index > 0 {
+            let start = max(0, index - 4)
+            groups.insert(String(digits[start..<index]), at: 0)
+            index = start
+        }
+        return "0x" + groups.joined(separator: "_")
     }
 
     private static func initializer(fields: [Field], access: String) -> String {
@@ -203,14 +277,7 @@ public struct MessagePackSerializableMacro: ExtensionMacro {
             lines.append("    let _msgpackEntryCount = try reader.readMapHeader()")
             lines.append("    for _ in 0 ..< _msgpackEntryCount {")
             lines.append("        switch try reader.readKey(matchedBy: { _msgpackKey in")
-            for (index, field) in decodable.enumerated() {
-                lines.append(
-                    "            if MessagePackSwift.MessagePackReader.key(_msgpackKey, matches: \(literal(field.key))) {"
-                )
-                lines.append("                return \(index)")
-                lines.append("            }")
-            }
-            lines.append("            return nil")
+            lines.append(contentsOf: matcherLines(decodable).map { "            \($0)" })
             lines.append("        }) {")
             for (index, field) in decodable.enumerated() {
                 lines.append("        case \(index):")
@@ -247,6 +314,98 @@ public struct MessagePackSerializableMacro: ExtensionMacro {
     /// Renders a Swift string literal for `string`, escaping as needed.
     private static func literal(_ string: String) -> String {
         String(reflecting: string)
+    }
+
+    // MARK: Key matching
+
+    /// A decodable field's wire key and its case index in the decode switch.
+    private struct KeyEntry {
+        var bytes: [UInt8]
+        var index: Int
+    }
+
+    /// The body of the generated `readKey(matchedBy:)` closure: a switch on
+    /// the wire key's length, then one `keyChunk` integer comparison per
+    /// 8 bytes of key — the automaton strategy MessagePack-CSharp uses —
+    /// instead of a `memcmp` per candidate field.
+    private static func matcherLines(_ decodable: [Field]) -> [String] {
+        let entries = decodable.enumerated().map { index, field in
+            KeyEntry(bytes: Array(field.key.utf8), index: index)
+        }
+        let byLength = Dictionary(grouping: entries, by: \.bytes.count)
+        var lines = ["switch _msgpackKey.count {"]
+        for length in byLength.keys.sorted() {
+            lines.append("case \(length):")
+            lines.append(contentsOf: matchGroup(byLength[length]!, offset: 0).map { "    \($0)" })
+        }
+        lines.append("default:")
+        lines.append("    return nil")
+        lines.append("}")
+        return lines
+    }
+
+    /// Emits the match for `entries`, which all have the same length and
+    /// identical bytes before `offset`: a chunk-value switch while several
+    /// candidates remain, a chunk-equality `if` once one does.
+    private static func matchGroup(_ entries: [KeyEntry], offset: Int) -> [String] {
+        let length = entries[0].bytes.count
+        if entries.count == 1 {
+            let entry = entries[0]
+            guard offset < length else {
+                // Only reachable for a zero-length key.
+                return ["return \(entry.index)"]
+            }
+            var conditions: [String] = []
+            var position = offset
+            while position < length {
+                let take = min(8, length - position)
+                let value = chunkValue(entry.bytes, offset: position, count: take)
+                conditions.append(
+                    "MessagePackSwift.MessagePackReader.keyChunk(_msgpackKey, offset: \(position), count: \(take)) == \(hexLiteral(value))"
+                )
+                position += take
+            }
+            var lines: [String] = []
+            for (index, condition) in conditions.enumerated() {
+                let prefix = index == 0 ? "if " : "    && "
+                let suffix = index == conditions.count - 1 ? " {" : ""
+                lines.append("\(prefix)\(condition)\(suffix)")
+            }
+            lines.append("    return \(entry.index)")
+            lines.append("}")
+            lines.append("return nil")
+            return lines
+        }
+        let take = min(8, length - offset)
+        let groups = Dictionary(grouping: entries) { chunkValue($0.bytes, offset: offset, count: take) }
+        var lines = [
+            "switch MessagePackSwift.MessagePackReader.keyChunk(_msgpackKey, offset: \(offset), count: \(take)) {"
+        ]
+        for value in groups.keys.sorted() {
+            let group = groups[value]!
+            lines.append("case \(hexLiteral(value)):")
+            if group.count == 1 && offset + take == length {
+                lines.append("    return \(group[0].index)")
+            } else {
+                lines.append(contentsOf: matchGroup(group, offset: offset + take).map { "    \($0)" })
+            }
+        }
+        lines.append("default:")
+        lines.append("    return nil")
+        lines.append("}")
+        return lines
+    }
+
+    /// Packs `count` bytes of `bytes` starting at `offset` into a `UInt64`,
+    /// first byte in the least significant position — the constant
+    /// ``MessagePackReader/keyChunk(_:offset:count:)`` produces for the same
+    /// bytes at runtime.
+    private static func chunkValue(_ bytes: [UInt8], offset: Int, count: Int) -> UInt64 {
+        var value: UInt64 = 0
+        for index in 0..<count {
+            value |= UInt64(bytes[offset + index]) << (index * 8)
+        }
+        return value
     }
 
     private static func accessModifier(of structDecl: StructDeclSyntax) -> String {

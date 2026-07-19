@@ -170,6 +170,33 @@ public struct MessagePackReader: ~Copyable {
         }
     }
 
+    /// Packs `count` bytes of `bytes` starting at `offset` into a `UInt64`,
+    /// first byte in the least significant position. Generated code inside a
+    /// ``readKey(matchedBy:)`` closure switches on the wire key's length and
+    /// then compares these chunks against constants computed at macro
+    /// expansion time, so matching a field name costs one integer comparison
+    /// per 8 bytes of key instead of a `memcmp` call per candidate.
+    ///
+    /// `count` must be 1...8 and `offset + count` must not exceed
+    /// `bytes.count`; generated callers guarantee both by switching on
+    /// `bytes.count` first.
+    @inlinable
+    @inline(__always)
+    public static func keyChunk(
+        _ bytes: UnsafeBufferPointer<UInt8>, offset: Int, count: Int
+    ) -> UInt64 {
+        assert(count >= 1 && count <= 8 && offset >= 0 && offset + count <= bytes.count)
+        let base = UnsafeRawPointer(bytes.baseAddress.unsafelyUnwrapped)
+        if count == 8 {
+            return UInt64(littleEndian: base.loadUnaligned(fromByteOffset: offset, as: UInt64.self))
+        }
+        var value: UInt64 = 0
+        for index in 0..<count {
+            value |= UInt64(base.load(fromByteOffset: offset + index, as: UInt8.self)) << (index * 8)
+        }
+        return value
+    }
+
     // MARK: Containers and extensions
 
     /// Reads an array header, enters the container, and returns the element

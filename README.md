@@ -120,10 +120,16 @@ let deserialized: Foo = try MessagePackSerializer.deserialize(Foo.self, from: se
 - Decoding accepts fields in any order, skips unknown keys, throws
   `MessagePackError.missingField` for absent required fields, and uses the
   property's default value (or `nil` for optionals) when a field is absent.
-  Field names are matched against the wire keys by raw byte comparison
-  (`MessagePackReader.readKey(matchedBy:)`), so no key `String` is ever
-  materialized; unknown keys are still UTF-8-validated before being
-  skipped.
+  Field names are matched against the wire keys without ever materializing
+  a key `String` (`MessagePackReader.readKey(matchedBy:)`): the generated
+  matcher switches on the key length and compares the raw UTF-8 in 8-byte
+  `UInt64` chunks against constants computed at expansion time (the
+  automaton strategy MessagePack-CSharp uses), so a lookup costs one
+  integer comparison per 8 bytes of key instead of a `memcmp` per
+  candidate field. Unknown keys are still UTF-8-validated before being
+  skipped. Serialization is precomputed the same way: the map header and
+  each field name are emitted as constant words
+  (`MessagePackWriter.writeRaw`), 8 bytes per store.
   Container nesting is limited to 128 levels (like the `Codable` route), so
   hostile input cannot drive unbounded recursion through recursively
   defined types.
@@ -161,9 +167,9 @@ p50 wall clock, same fixtures as the Codable table:
 
 | Workload | macro | Codable (MessagePack) | serializer route | JSON |
 |---|---|---|---|---|
-| serialize structs (1k) | 66 µs | 607 µs | 1.07 ms | 1.67 ms |
-| deserialize structs (1k) | 225 µs | 1.25 ms | 1.06 ms | 2.19 ms |
-| round trip structs (1k) | 292 µs | 1.85 ms | — | — |
+| serialize structs (1k) | 42 µs | 607 µs | 1.07 ms | 1.67 ms |
+| deserialize structs (1k) | 226 µs | 1.25 ms | 1.06 ms | 2.19 ms |
+| round trip structs (1k) | 270 µs | 1.85 ms | — | — |
 | serialize int array (10k) | 28 µs | 244 µs | — | — |
 | deserialize int array (10k) | 23 µs | 490 µs | — | — |
 

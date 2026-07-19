@@ -237,6 +237,16 @@ private struct Tagged<Tag>: Equatable {
     var raw: Int
 }
 
+/// Fields whose keys share their first 8 and 16 bytes, so the generated
+/// key matcher has to compare second and third `keyChunk`s to tell them
+/// apart.
+@MessagePackSerializable
+private struct SharedPrefix: Equatable {
+    var sharedPrefixAlpha: Int
+    var sharedPrefixBeta: Int
+    var sharedPrefixGamma: String
+}
+
 /// Hand-written conformance exercising the public writer/reader primitives
 /// (ext values, manual container handling, `endContainer`).
 private struct CustomExt: MessagePackSerializable, Equatable {
@@ -606,6 +616,24 @@ struct MessagePackSerializableDecodingTests {
                 .string("version"): .uint8(99),
             ]))
         #expect(decoded.version == 1)
+    }
+
+    @Test func sharedPrefixKeysMatchExactly() throws {
+        let value = SharedPrefix(sharedPrefixAlpha: 1, sharedPrefixBeta: 2, sharedPrefixGamma: "g")
+        try roundTrip(value)
+        // Wire keys that agree with a field name for the first 8 or 16
+        // bytes but diverge afterwards must be skipped as unknown, not
+        // matched by their prefix.
+        let decoded = try decode(
+            SharedPrefix.self,
+            from: .map([
+                .string("sharedPrefixAlphX"): .int64(99),
+                .string("sharedPrefixAlpha"): .int64(1),
+                .string("sharedPrefixBetX"): .int64(98),
+                .string("sharedPrefixBeta"): .int64(2),
+                .string("sharedPrefixGamma"): .string("g"),
+            ]))
+        #expect(decoded == value)
     }
 
     @Test func duplicateKeysLastWins() throws {
