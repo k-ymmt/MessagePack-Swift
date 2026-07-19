@@ -262,16 +262,49 @@ final class MessagePackEncoderImpl {
         return position
     }
 
-    /// Encodes a value of arbitrary `Encodable` type, special-casing the
-    /// types MessagePack has native representations for.
-    func encodeEncodable<T: Encodable>(_ value: T, codingPath: [CodingKey]) throws {
-        if T.self == Date.self {
+    /// Encodes a value of arbitrary `Encodable` type. Types MessagePack
+    /// represents natively are written directly, bypassing the `Encodable`
+    /// container machinery (and its per-value encoder and coding-path
+    /// allocations); the path closure only runs when a value actually needs
+    /// it (nested encoders and errors).
+    func encodeEncodable<T: Encodable>(
+        _ value: T, codingPath: @autoclosure () -> [CodingKey]
+    ) throws {
+        if T.self == String.self {
+            state.pointee.buffer.writeString(value as! String)
+        } else if T.self == Int.self {
+            state.pointee.buffer.writeInt(Int64(value as! Int))
+        } else if T.self == Bool.self {
+            state.pointee.buffer.writeBool(value as! Bool)
+        } else if T.self == Double.self {
+            state.pointee.buffer.writeDouble(value as! Double)
+        } else if T.self == Float.self {
+            state.pointee.buffer.writeFloat(value as! Float)
+        } else if T.self == Int64.self {
+            state.pointee.buffer.writeInt(value as! Int64)
+        } else if T.self == UInt64.self {
+            state.pointee.buffer.writeUInt(value as! UInt64)
+        } else if T.self == Int32.self {
+            state.pointee.buffer.writeInt(Int64(value as! Int32))
+        } else if T.self == UInt32.self {
+            state.pointee.buffer.writeUInt(UInt64(value as! UInt32))
+        } else if T.self == Int16.self {
+            state.pointee.buffer.writeInt(Int64(value as! Int16))
+        } else if T.self == UInt16.self {
+            state.pointee.buffer.writeUInt(UInt64(value as! UInt16))
+        } else if T.self == Int8.self {
+            state.pointee.buffer.writeInt(Int64(value as! Int8))
+        } else if T.self == UInt8.self {
+            state.pointee.buffer.writeUInt(UInt64(value as! UInt8))
+        } else if T.self == UInt.self {
+            state.pointee.buffer.writeUInt(UInt64(value as! UInt))
+        } else if T.self == Date.self {
             let date = value as! Date
             guard let timestamp = MessagePackTimestamp(exactly: date) else {
                 throw EncodingError.invalidValue(
                     value,
                     EncodingError.Context(
-                        codingPath: codingPath,
+                        codingPath: codingPath(),
                         debugDescription:
                             "Date (timeIntervalSince1970: \(date.timeIntervalSince1970)) cannot be represented as a MessagePack timestamp"
                     ))
@@ -283,15 +316,16 @@ final class MessagePackEncoderImpl {
             let timestamp = value as! MessagePackTimestamp
             state.pointee.buffer.writeExt(type: MessagePackTimestamp.extType, data: timestamp.data)
         } else {
+            let path = codingPath()
             let before = state.pointee.buffer.offset
-            try value.encode(to: _MessagePackEncoder(impl: self, codingPath: codingPath))
+            try value.encode(to: _MessagePackEncoder(impl: self, codingPath: path))
             if state.pointee.buffer.offset == before {
                 // MessagePack has no representation for "no value at all";
                 // JSONEncoder throws in the same situation.
                 throw EncodingError.invalidValue(
                     value,
                     EncodingError.Context(
-                        codingPath: codingPath,
+                        codingPath: path,
                         debugDescription: "Value of type \(T.self) did not encode any values"
                     ))
             }

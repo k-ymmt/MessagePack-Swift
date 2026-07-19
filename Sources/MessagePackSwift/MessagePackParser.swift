@@ -1,5 +1,24 @@
 import Foundation
 
+/// Builds a `String` from UTF-8 bytes, validating them; `nil` means invalid
+/// UTF-8. On OS 26+ this uses `UTF8Span` (validate once, `String(copying:)`
+/// skips revalidation, ~2x faster than `String(validating:)`). The
+/// implementation is selected once per process by creating the closure inside
+/// the `#available` scope: checking `#available` on every call costs a
+/// `__isPlatformVersionAtLeast` runtime call, which profiled at ~10% of
+/// struct-decode time.
+@usableFromInline
+let messagePackMakeString: @Sendable (UnsafeBufferPointer<UInt8>) -> String? = {
+    if #available(macOS 26.0, iOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, *) {
+        return { bytes in
+            guard let span = try? UTF8Span(validating: bytes.span) else { return nil }
+            return String(copying: span)
+        }
+    } else {
+        return { bytes in String(validating: bytes, as: UTF8.self) }
+    }
+}()
+
 extension MessagePackSerializer {
     /// An iterative (non-recursive) parser over a raw byte buffer.
     ///
@@ -63,19 +82,10 @@ extension MessagePackSerializer {
                 count: length
             )
             offset += length
-            if #available(macOS 26.0, iOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, *) {
-                // UTF8Span validates once and String(copying:) skips
-                // revalidation, which is ~2x faster than String(validating:).
-                guard let span = try? UTF8Span(validating: bytes.span) else {
-                    throw MessagePackError.invalidUTF8
-                }
-                return String(copying: span)
-            } else {
-                guard let string = String(validating: bytes, as: UTF8.self) else {
-                    throw MessagePackError.invalidUTF8
-                }
-                return string
+            guard let string = messagePackMakeString(bytes) else {
+                throw MessagePackError.invalidUTF8
             }
+            return string
         }
 
         @inlinable

@@ -282,50 +282,67 @@ enum MessagePackDecoding {
         (0xd4...0xd8).contains(format) || (0xc7...0xc9).contains(format)
     }
 
+    /// Reads one scalar with `read`, rewinding the parser and attaching the
+    /// coding path on failure. The path closure only runs when an error
+    /// actually propagates, keeping the happy path allocation-free.
+    @inline(__always)
+    private static func scalar<V>(
+        _ type: V.Type,
+        _ parser: inout Parser,
+        _ startOffset: Int,
+        _ codingPath: () -> [CodingKey],
+        _ read: (inout Parser) throws(MessagePackDecodeFailure) -> V
+    ) throws -> V {
+        do throws(MessagePackDecodeFailure) {
+            return try read(&parser)
+        } catch {
+            parser.offset = startOffset
+            throw decodingError(error, type: type, parser: parser, path: codingPath())
+        }
+    }
+
     /// Decodes a value of arbitrary `Decodable` type at the parser's current
-    /// position, advancing the parser past it. Special-cases the types
-    /// MessagePack has native representations for.
+    /// position, advancing the parser past it. Types MessagePack represents
+    /// natively decode directly, bypassing the `Decodable` container
+    /// machinery (and its per-value decoder, existential, and coding-path
+    /// allocations).
     static func unwrap<T: Decodable>(
         _ type: T.Type,
         parser: inout Parser,
         context: MessagePackDecodingContext,
-        codingPath: [CodingKey]
+        codingPath: @autoclosure () -> [CodingKey]
     ) throws -> T {
         // On failure the parser is rewound to the value start, so callers
         // that catch and retry (or an unkeyed container's cursor) never
         // desync from the element boundary.
         let startOffset = parser.offset
-        if type == Date.self {
-            do throws(MessagePackDecodeFailure) {
-                return try date(&parser) as! T
-            } catch {
-                parser.offset = startOffset
-                throw decodingError(error, type: type, parser: parser, path: codingPath)
-            }
+        if T.self == Int.self { return try scalar(Int.self, &parser, startOffset, codingPath, integer) as! T }
+        if T.self == String.self { return try scalar(String.self, &parser, startOffset, codingPath, string) as! T }
+        if T.self == Bool.self { return try scalar(Bool.self, &parser, startOffset, codingPath, bool) as! T }
+        if T.self == Double.self { return try scalar(Double.self, &parser, startOffset, codingPath, double) as! T }
+        if T.self == Float.self { return try scalar(Float.self, &parser, startOffset, codingPath, float) as! T }
+        if T.self == Int64.self { return try scalar(Int64.self, &parser, startOffset, codingPath, integer) as! T }
+        if T.self == UInt64.self { return try scalar(UInt64.self, &parser, startOffset, codingPath, integer) as! T }
+        if T.self == Int32.self { return try scalar(Int32.self, &parser, startOffset, codingPath, integer) as! T }
+        if T.self == UInt32.self { return try scalar(UInt32.self, &parser, startOffset, codingPath, integer) as! T }
+        if T.self == Int16.self { return try scalar(Int16.self, &parser, startOffset, codingPath, integer) as! T }
+        if T.self == UInt16.self { return try scalar(UInt16.self, &parser, startOffset, codingPath, integer) as! T }
+        if T.self == Int8.self { return try scalar(Int8.self, &parser, startOffset, codingPath, integer) as! T }
+        if T.self == UInt8.self { return try scalar(UInt8.self, &parser, startOffset, codingPath, integer) as! T }
+        if T.self == UInt.self { return try scalar(UInt.self, &parser, startOffset, codingPath, integer) as! T }
+        if T.self == Date.self { return try scalar(Date.self, &parser, startOffset, codingPath, date) as! T }
+        if T.self == Data.self { return try scalar(Data.self, &parser, startOffset, codingPath, binary) as! T }
+        if T.self == MessagePackTimestamp.self {
+            return try scalar(MessagePackTimestamp.self, &parser, startOffset, codingPath, timestamp) as! T
         }
-        if type == Data.self {
-            do throws(MessagePackDecodeFailure) {
-                return try binary(&parser) as! T
-            } catch {
-                parser.offset = startOffset
-                throw decodingError(error, type: type, parser: parser, path: codingPath)
-            }
-        }
-        if type == MessagePackTimestamp.self {
-            do throws(MessagePackDecodeFailure) {
-                return try timestamp(&parser) as! T
-            } catch {
-                parser.offset = startOffset
-                throw decodingError(error, type: type, parser: parser, path: codingPath)
-            }
-        }
+        let path = codingPath()
         let impl = MessagePackDecoderImpl(
-            context: context, offset: startOffset, codingPath: codingPath)
+            context: context, offset: startOffset, codingPath: path)
         let value = try type.init(from: impl)
         if context.memoStart == startOffset {
             parser.offset = context.memoEnd
         } else {
-            try skip(&parser, path: codingPath)
+            try skip(&parser, path: path)
         }
         return value
     }
@@ -894,9 +911,13 @@ struct MessagePackUnkeyedDecodingContainer: UnkeyedDecodingContainer {
 
     mutating func decode<T: Decodable>(_ type: T.Type) throws -> T {
         try checkEnd(type)
-        let path = codingPath + [MessagePackCodingKey(index: currentIndex)]
+        // Local copies so the lazy coding-path closure does not capture
+        // `self` while `parser` is passed inout.
+        let parentPath = codingPath
+        let index = currentIndex
         let value = try MessagePackDecoding.unwrap(
-            type, parser: &parser, context: context, codingPath: path)
+            type, parser: &parser, context: context,
+            codingPath: parentPath + [MessagePackCodingKey(index: index)])
         advanceIndex()
         return value
     }
