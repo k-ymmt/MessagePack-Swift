@@ -192,6 +192,81 @@ private struct Wide: Equatable {
     }
 }
 
+@MessagePackSerializable
+private struct Node: Equatable {
+    var children: [Node] = []
+
+    /// A chain of nodes `depth` levels deep.
+    static func chain(depth: Int) -> Node {
+        var node = Node()
+        for _ in 0..<depth {
+            node = Node(children: [node])
+        }
+        return node
+    }
+}
+
+@MessagePackSerializable
+private struct EscapedKeys: Equatable {
+    @MessagePackKey("q\"z")
+    var a: Int
+    @MessagePackKey("line\nbreak")
+    var b: Int
+}
+
+@MessagePackSerializable
+private struct ImplicitlyUnwrapped: Equatable {
+    var x: Int!
+}
+
+@MessagePackSerializable
+private struct QualifiedOptional: Equatable {
+    var x: Swift.Optional<Int>
+}
+
+@MessagePackSerializable
+private struct AliasBox<Element: Equatable>: Equatable {
+    typealias Items = [Element]
+    var items: Items
+}
+
+private enum Phantom {}
+
+@MessagePackSerializable
+private struct Tagged<Tag>: Equatable {
+    var raw: Int
+}
+
+/// Hand-written conformance exercising the public writer/reader primitives
+/// (ext values, manual container handling, `endContainer`).
+private struct CustomExt: MessagePackSerializable, Equatable {
+    var extType: Int8
+    var payload: Data
+    var numbers: [Int]
+
+    init(extType: Int8, payload: Data, numbers: [Int]) {
+        self.extType = extType
+        self.payload = payload
+        self.numbers = numbers
+    }
+
+    func serialize(into writer: inout MessagePackWriter) {
+        writer.writeArrayHeader(count: 2)
+        writer.writeExt(type: extType, data: payload)
+        numbers.serialize(into: &writer)
+    }
+
+    init(messagePack reader: inout MessagePackReader) throws(MessagePackError) {
+        let count = try reader.readArrayHeader()
+        guard count == 2 else {
+            throw MessagePackError.typeMismatch(expected: "2-element array", format: 0x00)
+        }
+        (extType, payload) = try reader.readExt()
+        numbers = try [Int](messagePack: &reader)
+        reader.endContainer()
+    }
+}
+
 /// Mirrors ``Person`` with a `Codable` conformance for cross-route tests.
 private struct CodablePerson: Codable, Equatable {
     var id: Int
@@ -340,6 +415,45 @@ struct MessagePackSerializableRoundTripTests {
         try roundTrip(MultiBinding(a: 1, b: 2, c: "c"))
     }
 
+    @Test func recursiveType() throws {
+        try roundTrip(Node.chain(depth: 20))
+        try roundTrip(Node(children: [Node.chain(depth: 3), Node(), Node.chain(depth: 5)]))
+    }
+
+    @Test func implicitlyUnwrappedOptionalField() throws {
+        try roundTrip(ImplicitlyUnwrapped(x: 5))
+        try roundTrip(ImplicitlyUnwrapped(x: nil))
+        let missing = try decode(ImplicitlyUnwrapped.self, from: .map([:]))
+        #expect(missing.x == nil)
+    }
+
+    @Test func qualifiedOptionalSpellingIsOptional() throws {
+        try roundTrip(QualifiedOptional(x: 3))
+        try roundTrip(QualifiedOptional(x: nil))
+        let missing = try decode(QualifiedOptional.self, from: .map([:]))
+        #expect(missing.x == nil)
+    }
+
+    @Test func genericParameterReachableOnlyThroughTypealias() throws {
+        try roundTrip(AliasBox<Int>(items: [1, 2, 3]))
+        try roundTrip(AliasBox<String>(items: ["a"]))
+    }
+
+    @Test func phantomGenericParameterIsNotConstrained() throws {
+        // Phantom conforms to nothing; serialization only touches `raw`.
+        try roundTrip(Tagged<Phantom>(raw: 7))
+    }
+
+    @Test func handWrittenConformance() throws {
+        let value = CustomExt(
+            extType: 42, payload: Data([1, 2, 3, 4, 5]), numbers: [10, -20, 300])
+        try roundTrip(value)
+        // The ext payload is on the wire as a real ext value.
+        let tree = try MessagePackSerializer.deserialize(
+            MessagePackValue.self, from: MessagePackSerializer.serialize(value))
+        #expect(tree.arrayValue?.first == .ext(type: 42, data: Data([1, 2, 3, 4, 5])))
+    }
+
     @Test func publicStruct() throws {
         try roundTrip(PublicFixture(value: 3))
     }
@@ -367,6 +481,19 @@ struct MessagePackSerializableWireFormatTests {
                     .string("bar"): .uint8(5),
                     .string("hoge"): .string("h"),
                 ]))
+    }
+
+    @Test func escapeSequencesInCustomKeys() throws {
+        let value = try MessagePackSerializer.deserialize(
+            MessagePackValue.self,
+            from: MessagePackSerializer.serialize(EscapedKeys(a: 1, b: 2)))
+        #expect(
+            value
+                == .map([
+                    .string("q\"z"): .uint8(1),
+                    .string("line\nbreak"): .uint8(2),
+                ]))
+        try roundTrip(EscapedKeys(a: 1, b: 2))
     }
 
     @Test func customAndEscapedKeys() throws {
@@ -579,6 +706,84 @@ struct MessagePackSerializableDecodingTests {
         #expect(throws: MessagePackError.insufficientData) {
             try MessagePackSerializer.deserialize(Foo.self, from: Data([0x8f]))
         }
+    }
+
+    @Test func wrongTypeForOptionalFieldThrows() throws {
+        // An optional field with a mistyped (non-nil) wire value must throw,
+        // not silently decode as nil.
+        #expect(throws: MessagePackError.typeMismatch(expected: "string", format: 0x07)) {
+            try decode(
+                Person.self,
+                from: .map([
+                    .string("id"): .uint8(1),
+                    .string("name"): .string("n"),
+                    .string("email"): .uint8(7),
+                    .string("isActive"): .bool(true),
+                    .string("score"): .float64(1.5),
+                    .string("tags"): .array([]),
+                ]))
+        }
+    }
+
+    @Test func nilForNonOptionalFieldThrows() throws {
+        #expect(throws: MessagePackError.typeMismatch(expected: "integer", format: 0xc0)) {
+            try decode(Foo.self, from: .map([.string("bar"): .nil, .string("hoge"): .string("h")]))
+        }
+    }
+
+    @Test func floatOverflowThrows() throws {
+        #expect(throws: MessagePackError.floatOverflow) {
+            try decode(Box<Float>.self, from: .map([.string("value"): .float64(1e300)]))
+        }
+        #expect(throws: MessagePackError.floatOverflow) {
+            try decode(Box<Float>.self, from: .map([.string("value"): .float64(-1e300)]))
+        }
+        // A wire infinity is a legitimate Float infinity, not an overflow.
+        let infinite = try decode(
+            Box<Float>.self, from: .map([.string("value"): .float64(.infinity)]))
+        #expect(infinite.value == .infinity)
+    }
+
+    @Test func setCollapsesDuplicateWireElements() throws {
+        // fixarray(3) [1, 1, 2]
+        let decoded = try MessagePackSerializer.deserialize(
+            Set<Int>.self, from: Data([0x93, 0x01, 0x01, 0x02]))
+        #expect(decoded == [1, 2])
+    }
+
+    @Test func dictionaryDuplicateWireKeysLastWins() throws {
+        // fixmap(2) { "a": 1, "a": 2 }
+        let decoded = try MessagePackSerializer.deserialize(
+            [String: Int].self, from: Data([0x82, 0xa1, 0x61, 0x01, 0xa1, 0x61, 0x02]))
+        #expect(decoded == ["a": 2])
+    }
+
+    @Test func dataSliceWithNonZeroStartIndex() throws {
+        let full = Data([0xff, 0xff]) + MessagePackSerializer.serialize(samplePerson)
+        let slice = full.dropFirst(2)
+        #expect(slice.startIndex != 0)
+        let decoded = try MessagePackSerializer.deserialize(Person.self, from: slice)
+        #expect(decoded == samplePerson)
+    }
+
+    @Test func hostileDeepRecursionThrows() throws {
+        // Each level of `Node` is fixmap(1), fixstr(8) "children", fixarray(1);
+        // the innermost array is empty. Depth 200 nests 400 containers, far
+        // past MessagePackReader.maxDepth, and must throw instead of
+        // overflowing the stack through the recursively generated inits.
+        let level: [UInt8] = [0x81, 0xa8] + Array("children".utf8)
+        var bytes: [UInt8] = []
+        for _ in 0..<200 {
+            bytes += level + [0x91]
+        }
+        bytes.removeLast()
+        bytes.append(0x90)
+        #expect(throws: MessagePackError.depthLimitExceeded) {
+            try MessagePackSerializer.deserialize(Node.self, from: Data(bytes))
+        }
+        // A depth well under the limit decodes fine.
+        let ok = MessagePackSerializer.serialize(Node.chain(depth: 60))
+        #expect(try MessagePackSerializer.deserialize(Node.self, from: ok) == Node.chain(depth: 60))
     }
 
     @Test func deepNestingOfDynamicValuesThrows() throws {

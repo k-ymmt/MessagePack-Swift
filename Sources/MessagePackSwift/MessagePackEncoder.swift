@@ -66,6 +66,8 @@ struct MessagePackScratchBuffer: MessagePackFormatSink {
 
     @usableFromInline
     init(initialCapacity: Int = 1024) {
+        // grow() doubles the capacity, so zero would never grow.
+        precondition(initialCapacity > 0, "initialCapacity must be positive")
         self.base = .allocate(byteCount: initialCapacity, alignment: 8)
         self.capacity = initialCapacity
     }

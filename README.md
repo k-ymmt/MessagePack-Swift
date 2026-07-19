@@ -106,15 +106,22 @@ let deserialized: Foo = try MessagePackSerializer.deserialize(Foo.self, from: se
 
 - Structs are serialized as maps keyed by property name, in declaration
   order — byte-identical to what the `Codable` route produces for an
-  equivalent type, so the two routes interoperate freely.
+  equivalent type, with one exception: a `nil` optional is written as an
+  explicit MessagePack nil, where `Codable` synthesis (`encodeIfPresent`)
+  omits the key. Either route decodes the other's output correctly, so they
+  still interoperate freely.
 - Decoding accepts fields in any order, skips unknown keys, throws
   `MessagePackError.missingField` for absent required fields, and uses the
   property's default value (or `nil` for optionals) when a field is absent.
+  Container nesting is limited to 128 levels (like the `Codable` route), so
+  hostile input cannot drive unbounded recursion through recursively
+  defined types.
 - `@MessagePackKey("wire_name")` renames a field on the wire;
-  `@MessagePackIgnored` excludes a stored property (it needs a default
-  value). Computed, `static`, and `lazy` properties are ignored; `let`
-  properties with an initial value are written but not read back, matching
-  `Codable` synthesis.
+  `@MessagePackIgnored` excludes a stored property (the macro requires it
+  to have a default value or be an optional `var`). Duplicate wire keys are
+  rejected at compile time. Computed, `static`, and `lazy` properties are
+  ignored; `let` properties with an initial value are written but not read
+  back, matching `Codable` synthesis.
 - Supported field types out of the box: `Bool`, all fixed-width integers,
   `Float`/`Double`, `String`, `Data` (bin), `Date` /
   `MessagePackTimestamp` (timestamp ext -1), `Optional`, `Array`, `Set`,
@@ -126,9 +133,16 @@ let deserialized: Foo = try MessagePackSerializer.deserialize(Foo.self, from: se
   enough (`enum Color: String, MessagePackSerializable`); a default
   implementation is provided for `RawRepresentable` types.
 - Custom conformances can be written by hand against the public
-  `MessagePackWriter` / `MessagePackReader` primitives.
+  `MessagePackWriter` / `MessagePackReader` primitives. Both are
+  noncopyable (`~Copyable`) — they own or borrow raw memory, so a copy
+  escaping a conformance would be unsound, and the compiler now rejects it.
+  When reading containers manually, balance each header read with
+  `endContainer()`.
 - `serialize` is non-throwing (single pass into a growable buffer, handed
-  to `Data` without copying); `deserialize` uses typed throws
+  to `Data` without copying); unrepresentable values (strings/containers
+  over MessagePack's 2^32-1 limits, dates outside the timestamp range) stop
+  with a precondition failure, unlike the throwing `serialize(value:)` /
+  `MessagePackEncoder` routes. `deserialize` uses typed throws
   (`throws(MessagePackError)`) and validates length claims against the
   remaining input before allocating.
 
@@ -180,4 +194,4 @@ Serialization performs 4 allocations total for flat payloads of any size (size-p
 swift test
 ```
 
-170 tests cover every format's byte-level encoding, boundary values (fixint/str/bin/array/map size class edges), Unicode, error paths (truncation, reserved bytes, invalid UTF-8, trailing bytes, depth limit), round-trip fidelity, the Codable layer (scalar extremes, nested/optional/enum/dictionary round trips, serializer interop, class inheritance via `superEncoder`, manual keyed/unkeyed/nested containers, and decoding errors), and the macro layer (expansion snapshots, round trips for every supported field type, wire-format details, decoding robustness against reordered/unknown/duplicate/hostile input, and byte-for-byte Codable interop).
+191 tests cover every format's byte-level encoding, boundary values (fixint/str/bin/array/map size class edges), Unicode, error paths (truncation, reserved bytes, invalid UTF-8, trailing bytes, depth limit), round-trip fidelity, the Codable layer (scalar extremes, nested/optional/enum/dictionary round trips, serializer interop, class inheritance via `superEncoder`, manual keyed/unkeyed/nested containers, and decoding errors), and the macro layer (expansion snapshots, round trips for every supported field type, wire-format details, decoding robustness against reordered/unknown/duplicate/hostile input, and byte-for-byte Codable interop).

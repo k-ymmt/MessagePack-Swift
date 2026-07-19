@@ -22,6 +22,9 @@ public enum MessagePackError: Error, Sendable, Equatable {
     case missingField(String)
     /// An integer on the wire does not fit in the integer type being decoded.
     case integerOverflow
+    /// A finite float 64 on the wire overflows the range of the `Float`
+    /// being decoded.
+    case floatOverflow
     /// A value decoded for a `RawRepresentable` type (such as an enum) does
     /// not match any of its cases.
     case invalidRawValue

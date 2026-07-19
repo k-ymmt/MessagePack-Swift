@@ -5,11 +5,14 @@ import SwiftSyntaxMacros
 
 // MARK: - Diagnostics
 
-enum MessagePackMacroDiagnostic: String, DiagnosticMessage {
+enum MessagePackMacroDiagnostic: DiagnosticMessage {
     case notAStruct
     case missingTypeAnnotation
     case unsupportedPattern
     case invalidKeyArgument
+    case duplicateKey(String)
+    case keyOnMultipleBindings
+    case ignoredPropertyNeedsDefault
 
     var message: String {
         switch self {
@@ -29,11 +32,38 @@ enum MessagePackMacroDiagnostic: String, DiagnosticMessage {
             return "'@MessagePackSerializable' does not support tuple-pattern stored properties."
         case .invalidKeyArgument:
             return "'@MessagePackKey' requires a single static string literal argument."
+        case .duplicateKey(let key):
+            return """
+                '@MessagePackSerializable' would use the map key \"\(key)\" for more than one \
+                stored property. Rename the property or change its '@MessagePackKey' so every \
+                key is unique.
+                """
+        case .keyOnMultipleBindings:
+            return """
+                '@MessagePackKey' cannot be applied to a declaration with multiple bindings; \
+                it would give every variable the same map key. Declare each property separately.
+                """
+        case .ignoredPropertyNeedsDefault:
+            return """
+                a stored property excluded with '@MessagePackIgnored' must have a default \
+                value (or be an optional 'var') so the generated initializer can leave it \
+                uninitialized.
+                """
         }
     }
 
     var diagnosticID: MessageID {
-        MessageID(domain: "MessagePackSwiftMacros", id: rawValue)
+        let id: String
+        switch self {
+        case .notAStruct: id = "notAStruct"
+        case .missingTypeAnnotation: id = "missingTypeAnnotation"
+        case .unsupportedPattern: id = "unsupportedPattern"
+        case .invalidKeyArgument: id = "invalidKeyArgument"
+        case .duplicateKey: id = "duplicateKey"
+        case .keyOnMultipleBindings: id = "keyOnMultipleBindings"
+        case .ignoredPropertyNeedsDefault: id = "ignoredPropertyNeedsDefault"
+        }
+        return MessageID(domain: "MessagePackSwiftMacros", id: id)
     }
 
     var severity: DiagnosticSeverity { .error }
@@ -80,8 +110,11 @@ public struct MessagePackSerializableMacro: ExtensionMacro {
         var key: String
         /// The declared type, as written.
         var type: TypeSyntax?
-        /// A type expression usable as `<Type>(messagePack: &reader)`.
-        /// Optional sugar is normalized to `Optional<...>`.
+        /// A type expression usable as `<Type>(messagePack: &reader)` and as
+        /// the generic argument of the decode-storage `Optional`. Optional
+        /// sugar (`T?`, `T!`, `Swift.Optional<T>`) is normalized to
+        /// `Optional<T>` because sugar spellings are not valid in those
+        /// positions.
         var constructor: String?
         /// Whether the declared type is optional (missing fields decode as nil).
         var isOptional: Bool
@@ -90,6 +123,8 @@ public struct MessagePackSerializableMacro: ExtensionMacro {
         /// False for `let` properties with an initializer, which cannot be
         /// assigned in an initializer; they are encoded but not decoded.
         var isDecodable: Bool
+        /// The binding this field came from, for diagnostics.
+        var syntax: Syntax
     }
 
     public static func expansion(
@@ -106,6 +141,17 @@ public struct MessagePackSerializableMacro: ExtensionMacro {
         }
         guard let fields = collectFields(of: structDecl, in: context) else {
             return []
+        }
+
+        var seenKeys = Set<String>()
+        for field in fields {
+            guard seenKeys.insert(field.key).inserted else {
+                context.diagnose(
+                    Diagnostic(
+                        node: field.syntax,
+                        message: MessagePackMacroDiagnostic.duplicateKey(field.key)))
+                return []
+            }
         }
 
         let access = accessModifier(of: structDecl)
@@ -148,9 +194,11 @@ public struct MessagePackSerializableMacro: ExtensionMacro {
             lines.append("        try reader.skipValue()")
             lines.append("        try reader.skipValue()")
             lines.append("    }")
+            lines.append("    reader.endContainer()")
         } else {
             for field in decodable {
-                lines.append("    var _msgpack_\(field.name): Optional<\(field.type!.trimmed)> = nil")
+                lines.append(
+                    "    var _msgpack_\(field.name): Optional<\(field.constructor!)> = nil")
             }
             lines.append("    let _msgpackEntryCount = try reader.readMapHeader()")
             lines.append("    for _ in 0 ..< _msgpackEntryCount {")
@@ -165,6 +213,7 @@ public struct MessagePackSerializableMacro: ExtensionMacro {
             lines.append("            try reader.skipValue()")
             lines.append("        }")
             lines.append("    }")
+            lines.append("    reader.endContainer()")
             for field in decodable {
                 if let defaultValue = field.defaultValue {
                     lines.append(
@@ -205,28 +254,83 @@ public struct MessagePackSerializableMacro: ExtensionMacro {
         return ""
     }
 
+    // MARK: Generic constraints
+
+    /// Collects the base identifiers appearing in a type, skipping member
+    /// components (`Outer.T` contributes `Outer`, not `T`), so an unrelated
+    /// nested type sharing a generic parameter's name is not mistaken for a
+    /// use of the parameter.
+    private final class TypeIdentifierCollector: SyntaxVisitor {
+        var names = Set<String>()
+
+        override func visit(_ node: IdentifierTypeSyntax) -> SyntaxVisitorContinueKind {
+            names.insert(node.name.text)
+            return .visitChildren
+        }
+    }
+
+    private static func identifiers(in type: TypeSyntax) -> Set<String> {
+        let collector = TypeIdentifierCollector(viewMode: .sourceAccurate)
+        collector.walk(type)
+        return collector.names
+    }
+
     /// Constrains each generic parameter that appears in a serialized field's
-    /// type to `MessagePackSerializable`.
+    /// type to `MessagePackSerializable`. Struct-local typealiases are
+    /// expanded so parameters reachable only through them are still
+    /// constrained.
     private static func genericWhereClause(of structDecl: StructDeclSyntax, fields: [Field]) -> String {
         guard let parameters = structDecl.genericParameterClause?.parameters else { return "" }
-        var constrained: [String] = []
-        for parameter in parameters {
-            let name = parameter.name.text
-            let isUsed = fields.contains { field in
-                guard let type = field.type else { return false }
-                return type.tokens(viewMode: .sourceAccurate).contains {
-                    $0.tokenKind == .identifier(name)
-                }
-            }
-            if isUsed {
-                constrained.append("\(name): MessagePackSwift.MessagePackSerializable")
+
+        var aliases: [String: TypeSyntax] = [:]
+        for member in structDecl.memberBlock.members {
+            if let alias = member.decl.as(TypeAliasDeclSyntax.self) {
+                aliases[alias.name.text] = alias.initializer.value
             }
         }
+
+        var used = Set<String>()
+        for field in fields {
+            if let type = field.type {
+                used.formUnion(identifiers(in: type))
+            }
+        }
+        var expandedAliases = Set<String>()
+        while let aliasName = used.first(where: {
+            aliases[$0] != nil && !expandedAliases.contains($0)
+        }) {
+            expandedAliases.insert(aliasName)
+            used.formUnion(identifiers(in: aliases[aliasName]!))
+        }
+
+        let constrained = parameters
+            .map(\.name.text)
+            .filter { used.contains($0) }
+            .map { "\($0): MessagePackSwift.MessagePackSerializable" }
         guard !constrained.isEmpty else { return "" }
         return " where " + constrained.joined(separator: ", ")
     }
 
     // MARK: Field collection
+
+    /// Whether a binding is a computed property (any accessor other than
+    /// `willSet`/`didSet`).
+    private static func isComputed(_ binding: PatternBindingSyntax) -> Bool {
+        guard let accessorBlock = binding.accessorBlock else { return false }
+        switch accessorBlock.accessors {
+        case .getter:
+            return true
+        case .accessors(let list):
+            return !list.allSatisfy { accessor in
+                switch accessor.accessorSpecifier.tokenKind {
+                case .keyword(.willSet), .keyword(.didSet):
+                    return true
+                default:
+                    return false
+                }
+            }
+        }
+    }
 
     /// Returns the stored properties to serialize, or nil after diagnosing an
     /// unsupported declaration.
@@ -254,11 +358,12 @@ public struct MessagePackSerializableMacro: ExtensionMacro {
                 case "MessagePackIgnored", "MessagePackSwift.MessagePackIgnored":
                     ignored = true
                 case "MessagePackKey", "MessagePackSwift.MessagePackKey":
+                    // representedLiteralValue resolves escape sequences and is
+                    // nil for interpolated (non-static) literals.
                     guard case .argumentList(let arguments) = attribute.arguments,
                         arguments.count == 1,
                         let literalExpr = arguments.first?.expression.as(StringLiteralExprSyntax.self),
-                        literalExpr.segments.count == 1,
-                        case .stringSegment(let segment)? = literalExpr.segments.first
+                        let value = literalExpr.representedLiteralValue
                     else {
                         context.diagnose(
                             Diagnostic(
@@ -266,14 +371,41 @@ public struct MessagePackSerializableMacro: ExtensionMacro {
                                 message: MessagePackMacroDiagnostic.invalidKeyArgument))
                         return nil
                     }
-                    customKey = segment.content.text
+                    customKey = value
                 default:
                     break
                 }
             }
-            if ignored { continue }
 
             let isLet = varDecl.bindingSpecifier.tokenKind == .keyword(.let)
+
+            if ignored {
+                // The generated initializer never assigns ignored properties,
+                // so each stored binding needs a default value — or must be an
+                // optional `var`, which Swift default-initializes to nil.
+                var carriedType: TypeSyntax?
+                for binding in varDecl.bindings.reversed() {
+                    if let annotation = binding.typeAnnotation { carriedType = annotation.type }
+                    if isComputed(binding) || binding.initializer != nil { continue }
+                    if !isLet, let type = carriedType, optionalWrappedType(type) != nil {
+                        continue
+                    }
+                    context.diagnose(
+                        Diagnostic(
+                            node: Syntax(binding),
+                            message: MessagePackMacroDiagnostic.ignoredPropertyNeedsDefault))
+                    return nil
+                }
+                continue
+            }
+
+            if customKey != nil && varDecl.bindings.count > 1 {
+                context.diagnose(
+                    Diagnostic(
+                        node: Syntax(varDecl),
+                        message: MessagePackMacroDiagnostic.keyOnMultipleBindings))
+                return nil
+            }
 
             // A type annotation covers preceding annotation-less,
             // initializer-less bindings (`var a, b: Int`), so walk backwards.
@@ -290,22 +422,7 @@ public struct MessagePackSerializableMacro: ExtensionMacro {
                     declaredType = carriedType
                 }
 
-                if let accessorBlock = binding.accessorBlock {
-                    switch accessorBlock.accessors {
-                    case .getter:
-                        continue  // computed
-                    case .accessors(let list):
-                        let isStored = list.allSatisfy { accessor in
-                            switch accessor.accessorSpecifier.tokenKind {
-                            case .keyword(.willSet), .keyword(.didSet):
-                                return true
-                            default:
-                                return false
-                            }
-                        }
-                        if !isStored { continue }  // computed
-                    }
-                }
+                if isComputed(binding) { continue }
 
                 guard let pattern = binding.pattern.as(IdentifierPatternSyntax.self) else {
                     context.diagnose(
@@ -341,7 +458,8 @@ public struct MessagePackSerializableMacro: ExtensionMacro {
                         constructor: constructor,
                         isOptional: wrapped != nil,
                         defaultValue: defaultValue,
-                        isDecodable: isDecodable
+                        isDecodable: isDecodable,
+                        syntax: Syntax(binding)
                     ))
             }
             fields.append(contentsOf: collected.reversed())
@@ -350,7 +468,7 @@ public struct MessagePackSerializableMacro: ExtensionMacro {
     }
 
     /// The wrapped type if `type` is spelled as an optional
-    /// (`T?`, `T!`, or `Optional<T>`), else nil.
+    /// (`T?`, `T!`, `Optional<T>`, or `Swift.Optional<T>`), else nil.
     private static func optionalWrappedType(_ type: TypeSyntax) -> TypeSyntax? {
         if let optional = type.as(OptionalTypeSyntax.self) {
             return optional.wrappedType
@@ -361,6 +479,16 @@ public struct MessagePackSerializableMacro: ExtensionMacro {
         if let identifier = type.as(IdentifierTypeSyntax.self),
             identifier.name.text == "Optional",
             let arguments = identifier.genericArgumentClause?.arguments,
+            arguments.count == 1,
+            let first = arguments.first,
+            case .type(let wrapped) = first.argument
+        {
+            return wrapped
+        }
+        if let member = type.as(MemberTypeSyntax.self),
+            member.name.text == "Optional",
+            member.baseType.as(IdentifierTypeSyntax.self)?.name.text == "Swift",
+            let arguments = member.genericArgumentClause?.arguments,
             arguments.count == 1,
             let first = arguments.first,
             case .type(let wrapped) = first.argument

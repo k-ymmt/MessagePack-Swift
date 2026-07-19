@@ -72,7 +72,12 @@ extension MessagePackSerializer {
     ///
     /// Values whose lengths exceed the MessagePack limits (strings, binary,
     /// or containers beyond 2^32-1 bytes/elements), and dates outside the
-    /// timestamp range, stop execution with a precondition failure.
+    /// timestamp range, stop execution with a precondition failure — unlike
+    /// ``serialize(value:)``, which throws
+    /// ``MessagePackError/valueTooLarge`` for oversized values in a
+    /// ``MessagePackValue`` tree. A hand-written conformance whose
+    /// `serialize(into:)` writes nothing produces empty data (macro-generated
+    /// conformances always write a map).
     @inlinable
     public static func serialize<T: MessagePackSerializable>(_ value: T) -> Data {
         var writer = MessagePackWriter(initialCapacity: 1024)
@@ -84,7 +89,10 @@ extension MessagePackSerializer {
     /// value.
     ///
     /// Throws ``MessagePackError/trailingBytes`` if `data` contains bytes
-    /// beyond the first top-level value.
+    /// beyond the first top-level value, and
+    /// ``MessagePackError/depthLimitExceeded`` if containers nest deeper
+    /// than ``MessagePackReader/maxDepth`` (protection against hostile input
+    /// driving unbounded recursion through recursively defined types).
     @inlinable
     public static func deserialize<T: MessagePackSerializable>(
         _ type: T.Type = T.self, from data: Data
@@ -270,6 +278,12 @@ extension String: MessagePackSerializable {
 
 extension Optional: MessagePackSerializable where Wrapped: MessagePackSerializable {
     /// Serializes the wrapped value, or MessagePack nil for `nil`.
+    ///
+    /// Like `JSONEncoder`, optionality is flattened on the wire: `.some` of a
+    /// nil-serializing value (`Int??.some(.none)`,
+    /// `MessagePackValue?.some(.nil)`) writes the same single nil and decodes
+    /// back as `.none`. Use a non-optional ``MessagePackValue`` field when
+    /// `.nil` must be preserved as a distinct value.
     @inlinable
     public func serialize(into writer: inout MessagePackWriter) {
         if let value = self {
@@ -289,6 +303,13 @@ extension Optional: MessagePackSerializable where Wrapped: MessagePackSerializab
     }
 }
 
+/// Upper bound on the element capacity collection decoders reserve before
+/// decoding, bounding the memory a hostile header can make a small input
+/// allocate (the header count is already limited to the remaining byte count,
+/// but each reserved element can be many times larger than a byte).
+@usableFromInline
+let messagePackMaxPreallocation = 4096
+
 extension Array: MessagePackSerializable where Element: MessagePackSerializable {
     @inlinable
     public func serialize(into writer: inout MessagePackWriter) {
@@ -302,15 +323,17 @@ extension Array: MessagePackSerializable where Element: MessagePackSerializable 
     public init(messagePack reader: inout MessagePackReader) throws(MessagePackError) {
         let count = try reader.readArrayHeader()
         self.init()
-        reserveCapacity(count)
+        reserveCapacity(Swift.min(count, messagePackMaxPreallocation))
         for _ in 0..<count {
             append(try Element(messagePack: &reader))
         }
+        reader.endContainer()
     }
 }
 
 extension Set: MessagePackSerializable where Element: MessagePackSerializable {
-    /// Serialized as a MessagePack array. Element order is unspecified.
+    /// Serialized as a MessagePack array. Element order is unspecified;
+    /// duplicate elements on the wire collapse into one when decoding.
     @inlinable
     public func serialize(into writer: inout MessagePackWriter) {
         writer.writeArrayHeader(count: count)
@@ -322,10 +345,11 @@ extension Set: MessagePackSerializable where Element: MessagePackSerializable {
     @inlinable
     public init(messagePack reader: inout MessagePackReader) throws(MessagePackError) {
         let count = try reader.readArrayHeader()
-        self.init(minimumCapacity: count)
+        self.init(minimumCapacity: Swift.min(count, messagePackMaxPreallocation))
         for _ in 0..<count {
             insert(try Element(messagePack: &reader))
         }
+        reader.endContainer()
     }
 }
 
@@ -345,11 +369,12 @@ where Key: MessagePackSerializable, Value: MessagePackSerializable {
     @inlinable
     public init(messagePack reader: inout MessagePackReader) throws(MessagePackError) {
         let count = try reader.readMapHeader()
-        self.init(minimumCapacity: count)
+        self.init(minimumCapacity: Swift.min(count, messagePackMaxPreallocation))
         for _ in 0..<count {
             let key = try Key(messagePack: &reader)
             self[key] = try Value(messagePack: &reader)
         }
+        reader.endContainer()
     }
 }
 

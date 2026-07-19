@@ -50,6 +50,7 @@ final class MessagePackSerializableMacroTests: XCTestCase {
                                 try reader.skipValue()
                             }
                         }
+                        reader.endContainer()
                         if let value = _msgpack_bar {
                             self.`bar` = value
                         } else {
@@ -92,7 +93,7 @@ final class MessagePackSerializableMacroTests: XCTestCase {
                     }
 
                     init(messagePack reader: inout MessagePackSwift.MessagePackReader) throws(MessagePackSwift.MessagePackError) {
-                        var _msgpack_name: Optional<String?> = nil
+                        var _msgpack_name: Optional<Optional<String>> = nil
                         var _msgpack_count: Optional<Int> = nil
                         let _msgpackEntryCount = try reader.readMapHeader()
                         for _ in 0 ..< _msgpackEntryCount {
@@ -105,6 +106,7 @@ final class MessagePackSerializableMacroTests: XCTestCase {
                                 try reader.skipValue()
                             }
                         }
+                        reader.endContainer()
                         self.`name` = _msgpack_name ?? nil
                         self.`count` = _msgpack_count ?? (5)
                     }
@@ -151,6 +153,7 @@ final class MessagePackSerializableMacroTests: XCTestCase {
                                 try reader.skipValue()
                             }
                         }
+                        reader.endContainer()
                         if let value = _msgpack_name {
                             self.`name` = value
                         } else {
@@ -201,6 +204,7 @@ final class MessagePackSerializableMacroTests: XCTestCase {
                                 try reader.skipValue()
                             }
                         }
+                        reader.endContainer()
                         if let value = _msgpack_first {
                             self.`first` = value
                         } else {
@@ -249,6 +253,7 @@ final class MessagePackSerializableMacroTests: XCTestCase {
                                 try reader.skipValue()
                             }
                         }
+                        reader.endContainer()
                         if let value = _msgpack_a {
                             self.`a` = value
                         } else {
@@ -281,6 +286,7 @@ final class MessagePackSerializableMacroTests: XCTestCase {
                             try reader.skipValue()
                             try reader.skipValue()
                         }
+                        reader.endContainer()
                     }
                 }
                 """,
@@ -326,6 +332,192 @@ final class MessagePackSerializableMacroTests: XCTestCase {
             diagnostics: [
                 DiagnosticSpec(
                     message: MessagePackMacroDiagnostic.notAStruct.message, line: 1, column: 1)
+            ],
+            macros: testMacros
+        )
+    }
+
+    func testClassDiagnoses() {
+        assertMacroExpansion(
+            """
+            @MessagePackSerializable
+            final class Foo {
+                var a: Int = 0
+            }
+            """,
+            expandedSource: """
+                final class Foo {
+                    var a: Int = 0
+                }
+                """,
+            diagnostics: [
+                DiagnosticSpec(
+                    message: MessagePackMacroDiagnostic.notAStruct.message, line: 1, column: 1)
+            ],
+            macros: testMacros
+        )
+    }
+
+    func testDuplicateKeyDiagnoses() {
+        assertMacroExpansion(
+            """
+            @MessagePackSerializable
+            struct Foo {
+                @MessagePackKey("b") var a: Int
+                var b: Int
+            }
+            """,
+            expandedSource: """
+                struct Foo {
+                    var a: Int
+                    var b: Int
+                }
+                """,
+            diagnostics: [
+                DiagnosticSpec(
+                    message: MessagePackMacroDiagnostic.duplicateKey("b").message,
+                    line: 4, column: 9)
+            ],
+            macros: testMacros
+        )
+    }
+
+    func testKeyOnMultipleBindingsDiagnoses() {
+        assertMacroExpansion(
+            """
+            @MessagePackSerializable
+            struct Foo {
+                @MessagePackKey("k") var a, b: Int
+            }
+            """,
+            expandedSource: """
+                struct Foo {
+                    var a, b: Int
+                }
+                """,
+            diagnostics: [
+                // The compiler also rejects peer macros on multi-binding
+                // declarations; our diagnostic explains the actual problem.
+                DiagnosticSpec(
+                    message: "peer macro can only be applied to a single variable",
+                    line: 3, column: 5),
+                DiagnosticSpec(
+                    message: MessagePackMacroDiagnostic.keyOnMultipleBindings.message,
+                    line: 3, column: 5),
+            ],
+            macros: testMacros
+        )
+    }
+
+    func testIgnoredWithoutDefaultDiagnoses() {
+        assertMacroExpansion(
+            """
+            @MessagePackSerializable
+            struct Foo {
+                var kept: Int
+                @MessagePackIgnored var cache: Int
+            }
+            """,
+            expandedSource: """
+                struct Foo {
+                    var kept: Int
+                    var cache: Int
+                }
+                """,
+            diagnostics: [
+                DiagnosticSpec(
+                    message: MessagePackMacroDiagnostic.ignoredPropertyNeedsDefault.message,
+                    line: 4, column: 29)
+            ],
+            macros: testMacros
+        )
+    }
+
+    func testIgnoredOptionalVarNeedsNoDefault() {
+        assertMacroExpansion(
+            """
+            @MessagePackSerializable
+            struct Foo {
+                var kept: Int
+                @MessagePackIgnored var cache: String?
+            }
+            """,
+            expandedSource: """
+                struct Foo {
+                    var kept: Int
+                    var cache: String?
+                }
+
+                extension Foo {
+                    func serialize(into writer: inout MessagePackSwift.MessagePackWriter) {
+                        writer.writeMapHeader(count: 1)
+                        writer.writeKey("kept")
+                        self.`kept`.serialize(into: &writer)
+                    }
+
+                    init(messagePack reader: inout MessagePackSwift.MessagePackReader) throws(MessagePackSwift.MessagePackError) {
+                        var _msgpack_kept: Optional<Int> = nil
+                        let _msgpackEntryCount = try reader.readMapHeader()
+                        for _ in 0 ..< _msgpackEntryCount {
+                            switch try reader.readString() {
+                            case "kept":
+                                _msgpack_kept = .some(try Int(messagePack: &reader))
+                            default:
+                                try reader.skipValue()
+                            }
+                        }
+                        reader.endContainer()
+                        if let value = _msgpack_kept {
+                            self.`kept` = value
+                        } else {
+                            throw MessagePackSwift.MessagePackError.missingField("kept")
+                        }
+                    }
+                }
+                """,
+            macros: testMacros
+        )
+    }
+
+    func testTuplePatternDiagnoses() {
+        assertMacroExpansion(
+            """
+            @MessagePackSerializable
+            struct Foo {
+                var (a, b): (Int, Int)
+            }
+            """,
+            expandedSource: """
+                struct Foo {
+                    var (a, b): (Int, Int)
+                }
+                """,
+            diagnostics: [
+                DiagnosticSpec(
+                    message: MessagePackMacroDiagnostic.unsupportedPattern.message,
+                    line: 3, column: 9)
+            ],
+            macros: testMacros
+        )
+    }
+
+    func testInterpolatedKeyDiagnoses() {
+        assertMacroExpansion(
+            """
+            @MessagePackSerializable
+            struct Foo {
+                @MessagePackKey("k\\(1)") var a: Int
+            }
+            """,
+            expandedSource: """
+                struct Foo {
+                    var a: Int
+                }
+                """,
+            diagnostics: [
+                DiagnosticSpec(
+                    message: MessagePackMacroDiagnostic.invalidKeyArgument.message,
+                    line: 3, column: 5)
             ],
             macros: testMacros
         )

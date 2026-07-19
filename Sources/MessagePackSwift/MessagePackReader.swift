@@ -8,9 +8,28 @@ import Foundation
 /// Each `read` method consumes one value and throws
 /// ``MessagePackError/typeMismatch(expected:format:)`` if the next value on
 /// the wire has a different type, leaving the reader positioned at that value.
-public struct MessagePackReader {
+///
+/// The reader is noncopyable: it borrows memory owned by the enclosing
+/// `deserialize` call, so a copy could not safely outlive it.
+///
+/// Reading a container header enters that container; balance it with
+/// ``endContainer()`` after reading the container's values. Nesting deeper
+/// than ``maxDepth`` throws ``MessagePackError/depthLimitExceeded``, which
+/// bounds the recursion hostile input can drive through recursively defined
+/// `MessagePackSerializable` types.
+public struct MessagePackReader: ~Copyable {
+    /// Maximum container nesting accepted while decoding, matching
+    /// ``MessagePackDecoder``. Bounds stack use against hostile input aimed
+    /// at recursive types, including on the small stacks of cooperative-pool
+    /// threads.
+    public static let maxDepth = 128
+
     @usableFromInline
     var parser: MessagePackSerializer.Parser
+
+    /// The number of containers currently entered and not yet ended.
+    @usableFromInline
+    var depth = 0
 
     /// Creates a reader over `buffer`, which must stay valid while the
     /// reader is used.
@@ -82,10 +101,17 @@ public struct MessagePackReader {
     }
 
     /// Reads a float 32/64 (or, leniently, any integer) as a `Float`.
-    /// float 64 values are rounded to the nearest `Float`.
+    /// float 64 values are rounded to the nearest `Float`; finite values that
+    /// overflow `Float`'s range throw ``MessagePackError/floatOverflow``
+    /// (matching ``MessagePackDecoder``) instead of becoming infinite.
     @inlinable
     public mutating func readFloat() throws(MessagePackError) -> Float {
-        Float(try readDouble())
+        let value = try readDouble()
+        let narrowed = Float(value)
+        guard !(narrowed.isInfinite && value.isFinite) else {
+            throw MessagePackError.floatOverflow
+        }
+        return narrowed
     }
 
     @inlinable
@@ -107,9 +133,10 @@ public struct MessagePackReader {
 
     // MARK: Containers and extensions
 
-    /// Reads an array header and returns the element count. The count is
-    /// validated against the remaining input (each element takes at least one
-    /// byte), so it is safe to reserve capacity for.
+    /// Reads an array header, enters the container, and returns the element
+    /// count. The count is validated against the remaining input (each
+    /// element takes at least one byte), so it is safe to reserve capacity
+    /// for. Call ``endContainer()`` after reading the elements.
     @inlinable
     public mutating func readArrayHeader() throws(MessagePackError) -> Int {
         guard let count = try parser.readArrayHeader() else {
@@ -118,12 +145,14 @@ public struct MessagePackReader {
         guard count <= parser.count - parser.offset else {
             throw MessagePackError.insufficientData
         }
+        try enterContainer()
         return count
     }
 
-    /// Reads a map header and returns the entry count. The count is validated
-    /// against the remaining input (each entry takes at least two bytes), so
-    /// it is safe to reserve capacity for.
+    /// Reads a map header, enters the container, and returns the entry count.
+    /// The count is validated against the remaining input (each entry takes
+    /// at least two bytes), so it is safe to reserve capacity for. Call
+    /// ``endContainer()`` after reading the entries.
     @inlinable
     public mutating func readMapHeader() throws(MessagePackError) -> Int {
         guard let count = try parser.readMapHeader() else {
@@ -132,7 +161,30 @@ public struct MessagePackReader {
         guard count <= (parser.count - parser.offset) / 2 else {
             throw MessagePackError.insufficientData
         }
+        try enterContainer()
         return count
+    }
+
+    @inlinable
+    mutating func enterContainer() throws(MessagePackError) {
+        guard depth < MessagePackReader.maxDepth else {
+            throw MessagePackError.depthLimitExceeded
+        }
+        depth += 1
+    }
+
+    /// Marks the container most recently entered by ``readArrayHeader()`` /
+    /// ``readMapHeader()`` as fully read. Generated `init(messagePack:)`
+    /// implementations and the collection conformances call this after their
+    /// element loops; hand-written conformances that read container headers
+    /// must do the same, or long sequences of containers will exhaust
+    /// ``maxDepth``. (Not calling it on error paths is fine — decoding
+    /// aborts anyway.)
+    @inlinable
+    public mutating func endContainer() {
+        if depth > 0 {
+            depth -= 1
+        }
     }
 
     /// Reads an extension value (type code and payload).

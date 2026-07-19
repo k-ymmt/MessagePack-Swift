@@ -9,7 +9,11 @@ import Foundation
 /// containers are written with the smallest wire format that represents them,
 /// so the output is byte-identical to ``MessagePackSerializer`` and
 /// ``MessagePackEncoder`` for equivalent values.
-public struct MessagePackWriter {
+///
+/// The writer is noncopyable: it owns a raw buffer whose ownership moves into
+/// the returned `Data`, so a copy escaping a `serialize(into:)`
+/// implementation could never be used safely.
+public struct MessagePackWriter: ~Copyable {
     @usableFromInline
     var buffer: MessagePackScratchBuffer
 
@@ -18,8 +22,7 @@ public struct MessagePackWriter {
         self.buffer = MessagePackScratchBuffer(initialCapacity: initialCapacity)
     }
 
-    /// Wraps the buffer in a `Data` without copying. The writer must not be
-    /// used afterwards.
+    /// Wraps the buffer in a `Data` without copying.
     @usableFromInline
     consuming func finish() -> Data {
         let buffer = self.buffer
@@ -28,12 +31,6 @@ public struct MessagePackWriter {
             count: buffer.offset,
             deallocator: .custom { pointer, _ in pointer.deallocate() }
         )
-    }
-
-    /// Releases the buffer without producing data (error paths).
-    @usableFromInline
-    consuming func abandon() {
-        buffer.deallocate()
     }
 
     // MARK: Scalars
