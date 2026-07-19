@@ -86,6 +86,62 @@ p50 wall clock, same machine as below, 1k-element array of a 6-field struct:
 | encode int array (10k) | 1.23 ms | — |
 | decode int array (10k) | 1.61 ms | — |
 
+## Macro: `@MessagePackSerializable`
+
+The fastest route. The macro generates a `MessagePackSerializable` conformance
+at compile time — direct wire-format reads/writes with no `Codable` container
+machinery, no intermediate `MessagePackValue` tree, and no runtime reflection:
+
+```swift
+@MessagePackSerializable
+struct Foo {
+    let bar: Int
+    let hoge: String
+}
+
+let foo = Foo(bar: 0, hoge: "")
+let serialized: Data = MessagePackSerializer.serialize(foo)
+let deserialized: Foo = try MessagePackSerializer.deserialize(Foo.self, from: serialized)
+```
+
+- Structs are serialized as maps keyed by property name, in declaration
+  order — byte-identical to what the `Codable` route produces for an
+  equivalent type, so the two routes interoperate freely.
+- Decoding accepts fields in any order, skips unknown keys, throws
+  `MessagePackError.missingField` for absent required fields, and uses the
+  property's default value (or `nil` for optionals) when a field is absent.
+- `@MessagePackKey("wire_name")` renames a field on the wire;
+  `@MessagePackIgnored` excludes a stored property (it needs a default
+  value). Computed, `static`, and `lazy` properties are ignored; `let`
+  properties with an initial value are written but not read back, matching
+  `Codable` synthesis.
+- Supported field types out of the box: `Bool`, all fixed-width integers,
+  `Float`/`Double`, `String`, `Data` (bin), `Date` /
+  `MessagePackTimestamp` (timestamp ext -1), `Optional`, `Array`, `Set`,
+  `Dictionary` (any serializable key type, e.g. `Int` keys), nested
+  `@MessagePackSerializable` types, generic structs (parameters are
+  constrained automatically), and `MessagePackValue` for dynamically shaped
+  fields.
+- Enums with a raw value need no macro — declaring the conformance is
+  enough (`enum Color: String, MessagePackSerializable`); a default
+  implementation is provided for `RawRepresentable` types.
+- Custom conformances can be written by hand against the public
+  `MessagePackWriter` / `MessagePackReader` primitives.
+- `serialize` is non-throwing (single pass into a growable buffer, handed
+  to `Data` without copying); `deserialize` uses typed throws
+  (`throws(MessagePackError)`) and validates length claims against the
+  remaining input before allocating.
+
+p50 wall clock, same fixtures as the Codable table:
+
+| Workload | macro | Codable (MessagePack) | serializer route | JSON |
+|---|---|---|---|---|
+| serialize structs (1k) | 67 µs | 805 µs | 1.04 ms | 1.67 ms |
+| deserialize structs (1k) | 363 µs | 1.51 ms | 1.09 ms | 2.20 ms |
+| round trip structs (1k) | 411 µs | 2.41 ms | — | — |
+| serialize int array (10k) | 28 µs | 1.23 ms | — | — |
+| deserialize int array (10k) | 22 µs | 1.60 ms | — | — |
+
 ## Design notes
 
 - **Spec compliance**: All format families are supported (fixint, fixmap, fixarray, fixstr, nil, bool, bin 8/16/32, ext 8/16/32, float 32/64, uint/int 8–64, fixext 1–16, str 8/16/32, array 16/32, map 16/32). The reserved byte `0xc1` and invalid UTF-8 in strings are rejected. Timestamps round-trip through `.ext(type: -1, ...)`.
@@ -124,4 +180,4 @@ Serialization performs 4 allocations total for flat payloads of any size (size-p
 swift test
 ```
 
-114 tests cover every format's byte-level encoding, boundary values (fixint/str/bin/array/map size class edges), Unicode, error paths (truncation, reserved bytes, invalid UTF-8, trailing bytes, depth limit), round-trip fidelity, and the Codable layer (scalar extremes, nested/optional/enum/dictionary round trips, serializer interop, class inheritance via `superEncoder`, manual keyed/unkeyed/nested containers, and decoding errors).
+170 tests cover every format's byte-level encoding, boundary values (fixint/str/bin/array/map size class edges), Unicode, error paths (truncation, reserved bytes, invalid UTF-8, trailing bytes, depth limit), round-trip fidelity, the Codable layer (scalar extremes, nested/optional/enum/dictionary round trips, serializer interop, class inheritance via `superEncoder`, manual keyed/unkeyed/nested containers, and decoding errors), and the macro layer (expansion snapshots, round trips for every supported field type, wire-format details, decoding robustness against reordered/unknown/duplicate/hostile input, and byte-for-byte Codable interop).

@@ -55,29 +55,37 @@ extension MessagePackEncoder: @unchecked Sendable {}
 /// A growable raw byte buffer conforming to ``MessagePackFormatSink``.
 /// Used as scratch space during encoding; the final `Data` is produced by
 /// ``MessagePackEncoderImpl/finalize()``.
+@usableFromInline
 struct MessagePackScratchBuffer: MessagePackFormatSink {
-    private(set) var base: UnsafeMutableRawPointer
-    private(set) var capacity: Int
-    private(set) var offset = 0
+    @usableFromInline
+    var base: UnsafeMutableRawPointer
+    @usableFromInline
+    var capacity: Int
+    @usableFromInline
+    var offset = 0
 
+    @usableFromInline
     init(initialCapacity: Int = 1024) {
         self.base = .allocate(byteCount: initialCapacity, alignment: 8)
         self.capacity = initialCapacity
     }
 
+    @usableFromInline
     func deallocate() {
         base.deallocate()
     }
 
+    @inlinable
     @inline(__always)
-    private mutating func ensure(_ additional: Int) {
+    mutating func ensure(_ additional: Int) {
         if capacity - offset < additional {
             grow(additional)
         }
     }
 
+    @usableFromInline
     @inline(never)
-    private mutating func grow(_ additional: Int) {
+    mutating func grow(_ additional: Int) {
         var newCapacity = capacity * 2
         while newCapacity - offset < additional {
             newCapacity *= 2
@@ -89,6 +97,7 @@ struct MessagePackScratchBuffer: MessagePackFormatSink {
         capacity = newCapacity
     }
 
+    @inlinable
     @inline(__always)
     mutating func writeByte(_ byte: UInt8) {
         ensure(1)
@@ -96,6 +105,7 @@ struct MessagePackScratchBuffer: MessagePackFormatSink {
         offset += 1
     }
 
+    @inlinable
     @inline(__always)
     mutating func writeBigEndian<T: FixedWidthInteger>(_ value: T) {
         ensure(MemoryLayout<T>.size)
@@ -103,6 +113,7 @@ struct MessagePackScratchBuffer: MessagePackFormatSink {
         offset += MemoryLayout<T>.size
     }
 
+    @inlinable
     @inline(__always)
     mutating func writeBytes(_ pointer: UnsafeRawPointer, count: Int) {
         ensure(count)

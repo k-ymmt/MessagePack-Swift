@@ -1,5 +1,6 @@
 // swift-tools-version: 6.4
 
+import CompilerPluginSupport
 import PackageDescription
 
 let package = Package(
@@ -19,10 +20,19 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/ordo-one/package-benchmark", from: "1.29.0"),
+        .package(url: "https://github.com/swiftlang/swift-syntax", "600.0.0"..<"700.0.0"),
     ],
     targets: [
+        .macro(
+            name: "MessagePackSwiftMacros",
+            dependencies: [
+                .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
+                .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
+            ]
+        ),
         .target(
             name: "MessagePackSwift",
+            dependencies: ["MessagePackSwiftMacros"],
             swiftSettings: [
                 .enableUpcomingFeature("ApproachableConcurrency"),
             ],
@@ -33,6 +43,13 @@ let package = Package(
             swiftSettings: [
                 .enableUpcomingFeature("ApproachableConcurrency"),
             ],
+        ),
+        .testTarget(
+            name: "MessagePackSwiftMacrosTests",
+            dependencies: [
+                "MessagePackSwiftMacros",
+                .product(name: "SwiftSyntaxMacrosTestSupport", package: "swift-syntax"),
+            ]
         ),
         .executableTarget(
             name: "MessagePackBenchmarks",

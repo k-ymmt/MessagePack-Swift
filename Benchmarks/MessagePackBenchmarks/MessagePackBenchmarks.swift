@@ -68,6 +68,32 @@ private let people = (0..<1_000).map {
 
 private let intValues = (0..<10_000).map { $0 * 31 - 5_000 }
 
+// MARK: - Macro fixtures
+
+/// Mirrors ``Person`` on the macro (`MessagePackSerializable`) route.
+@MessagePackSerializable
+private struct MacroPerson {
+    var id: Int
+    var name: String
+    var email: String?
+    var isActive: Bool
+    var score: Double
+    var tags: [String]
+}
+
+private let macroPeople = (0..<1_000).map {
+    MacroPerson(
+        id: $0,
+        name: "person number \($0)",
+        email: $0 % 3 == 0 ? nil : "person\($0)@example.com",
+        isActive: $0 % 2 == 0,
+        score: Double($0) * 0.5,
+        tags: ["tag\($0 % 5)", "tag\($0 % 7)"]
+    )
+}
+
+private let macroPeopleData = MessagePackSerializer.serialize(macroPeople)
+
 private let peopleMsgPackData = try! MessagePackEncoder().encode(people)
 private let peopleJSONData = try! JSONEncoder().encode(people)
 private let intValuesMsgPackData = try! MessagePackEncoder().encode(intValues)
@@ -251,6 +277,39 @@ let benchmarks: @Sendable () -> Void = {
                 )
             }
             blackHole(decoded)
+        }
+    }
+
+    // The macro route on the same struct fixture: @MessagePackSerializable
+    // generated code writing/reading the wire format directly.
+    Benchmark("macro serialize: structs (1k)") { benchmark in
+        for _ in benchmark.scaledIterations {
+            blackHole(MessagePackSerializer.serialize(macroPeople))
+        }
+    }
+
+    Benchmark("macro deserialize: structs (1k)") { benchmark in
+        for _ in benchmark.scaledIterations {
+            blackHole(try MessagePackSerializer.deserialize([MacroPerson].self, from: macroPeopleData))
+        }
+    }
+
+    Benchmark("macro round trip: structs (1k)") { benchmark in
+        for _ in benchmark.scaledIterations {
+            let data = MessagePackSerializer.serialize(macroPeople)
+            blackHole(try MessagePackSerializer.deserialize([MacroPerson].self, from: data))
+        }
+    }
+
+    Benchmark("macro serialize: int array (10k)") { benchmark in
+        for _ in benchmark.scaledIterations {
+            blackHole(MessagePackSerializer.serialize(intValues))
+        }
+    }
+
+    Benchmark("macro deserialize: int array (10k)") { benchmark in
+        for _ in benchmark.scaledIterations {
+            blackHole(try MessagePackSerializer.deserialize([Int].self, from: intValuesMsgPackData))
         }
     }
 

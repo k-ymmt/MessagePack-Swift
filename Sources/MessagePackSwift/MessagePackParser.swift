@@ -6,11 +6,16 @@ extension MessagePackSerializer {
     /// Containers are tracked on an explicit frame stack, so hostile input
     /// with extreme nesting cannot overflow the call stack; nesting beyond
     /// ``MessagePackSerializer/maxDepth`` throws instead.
+    @usableFromInline
     struct Parser {
+        @usableFromInline
         let base: UnsafeRawPointer?
+        @usableFromInline
         let count: Int
+        @usableFromInline
         var offset = 0
 
+        @usableFromInline
         init(buffer: UnsafeRawBufferPointer) {
             self.base = buffer.baseAddress
             self.count = buffer.count
@@ -30,6 +35,7 @@ extension MessagePackSerializer {
             let isMap: Bool
         }
 
+        @inlinable
         @inline(__always)
         mutating func readFormatByte() throws(MessagePackError) -> UInt8 {
             guard offset < count, let base else { throw MessagePackError.insufficientData }
@@ -38,6 +44,7 @@ extension MessagePackSerializer {
             return byte
         }
 
+        @inlinable
         @inline(__always)
         mutating func readBigEndian<T: FixedWidthInteger>(_ type: T.Type) throws(MessagePackError) -> T {
             let size = MemoryLayout<T>.size
@@ -47,6 +54,7 @@ extension MessagePackSerializer {
             return value
         }
 
+        @inlinable
         @inline(__always)
         mutating func readString(length: Int) throws(MessagePackError) -> String {
             guard count - offset >= length, let base else { throw MessagePackError.insufficientData }
@@ -70,6 +78,7 @@ extension MessagePackSerializer {
             }
         }
 
+        @inlinable
         @inline(__always)
         mutating func readData(length: Int) throws(MessagePackError) -> Data {
             guard count - offset >= length, let base else { throw MessagePackError.insufficientData }
@@ -78,6 +87,7 @@ extension MessagePackSerializer {
             return data
         }
 
+        @inlinable
         @inline(__always)
         mutating func readExt(length: Int) throws(MessagePackError) -> MessagePackValue {
             let type = Int8(bitPattern: try readBigEndian(UInt8.self))
@@ -233,6 +243,7 @@ extension MessagePackSerializer {
 
 /// An integer read from the wire, preserving whether it came from a signed or
 /// unsigned format family.
+@usableFromInline
 enum MessagePackRawInteger {
     case signed(Int64)
     case unsigned(UInt64)
@@ -241,6 +252,7 @@ enum MessagePackRawInteger {
 extension MessagePackSerializer.Parser {
     /// Reads any integer format and returns it, or rewinds and returns `nil`
     /// if the next value is not an integer.
+    @inlinable
     @inline(__always)
     mutating func readRawInteger() throws(MessagePackError) -> MessagePackRawInteger? {
         let start = offset
@@ -274,6 +286,7 @@ extension MessagePackSerializer.Parser {
 
     /// Reads a float 32/64 (or, leniently, any integer) as a `Double`, or
     /// rewinds and returns `nil`.
+    @inlinable
     @inline(__always)
     mutating func readRawDouble() throws(MessagePackError) -> Double? {
         let start = offset
@@ -293,6 +306,7 @@ extension MessagePackSerializer.Parser {
         }
     }
 
+    @inlinable
     @inline(__always)
     mutating func readRawBool() throws(MessagePackError) -> Bool? {
         let start = offset
@@ -306,6 +320,7 @@ extension MessagePackSerializer.Parser {
         }
     }
 
+    @inlinable
     @inline(__always)
     mutating func readRawString() throws(MessagePackError) -> String? {
         let start = offset
@@ -325,6 +340,7 @@ extension MessagePackSerializer.Parser {
         }
     }
 
+    @inlinable
     @inline(__always)
     mutating func readRawBinary() throws(MessagePackError) -> Data? {
         let start = offset
@@ -342,6 +358,7 @@ extension MessagePackSerializer.Parser {
         }
     }
 
+    @inlinable
     @inline(__always)
     mutating func readRawExt() throws(MessagePackError) -> (type: Int8, data: Data)? {
         let start = offset
@@ -366,6 +383,7 @@ extension MessagePackSerializer.Parser {
 
     /// Reads an array header and returns the element count, or rewinds and
     /// returns `nil` if the next value is not an array.
+    @inlinable
     @inline(__always)
     mutating func readArrayHeader() throws(MessagePackError) -> Int? {
         let start = offset
@@ -385,6 +403,7 @@ extension MessagePackSerializer.Parser {
 
     /// Reads a map header and returns the entry count, or rewinds and returns
     /// `nil` if the next value is not a map.
+    @inlinable
     @inline(__always)
     mutating func readMapHeader() throws(MessagePackError) -> Int? {
         let start = offset
@@ -403,12 +422,14 @@ extension MessagePackSerializer.Parser {
     }
 
     /// The next format byte without consuming it.
+    @inlinable
     @inline(__always)
     func peekFormat() throws(MessagePackError) -> UInt8 {
         guard offset < count, let base else { throw MessagePackError.insufficientData }
         return base.load(fromByteOffset: offset, as: UInt8.self)
     }
 
+    @inlinable
     @inline(__always)
     mutating func skipBytes(_ n: Int) throws(MessagePackError) {
         guard count - offset >= n else { throw MessagePackError.insufficientData }
@@ -418,6 +439,7 @@ extension MessagePackSerializer.Parser {
     /// Advances past one complete value (including nested containers) without
     /// materializing anything. Iterative; each loop iteration consumes at
     /// least one input byte, so hostile counts terminate promptly.
+    @usableFromInline
     mutating func skipValue() throws(MessagePackError) {
         var remaining = 1
         while remaining > 0 {

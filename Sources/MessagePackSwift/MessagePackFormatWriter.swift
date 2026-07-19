@@ -3,8 +3,10 @@ import Foundation
 /// A low-level byte sink that MessagePack format emission is generic over.
 ///
 /// ``MessagePackSerializer/Writer`` (pre-sized buffer used by the value-tree
-/// serializer) and the growable buffer used by ``MessagePackEncoder`` both
-/// conform, sharing a single implementation of the wire-format logic.
+/// serializer), the growable buffer used by ``MessagePackEncoder``, and the
+/// public ``MessagePackWriter`` all conform, sharing a single implementation
+/// of the wire-format logic.
+@usableFromInline
 protocol MessagePackFormatSink {
     mutating func writeByte(_ byte: UInt8)
     mutating func writeBigEndian<T: FixedWidthInteger>(_ value: T)
@@ -12,11 +14,13 @@ protocol MessagePackFormatSink {
 }
 
 extension MessagePackFormatSink {
+    @inlinable
     @inline(__always)
     mutating func writeNil() {
         writeByte(0xc0)
     }
 
+    @inlinable
     @inline(__always)
     mutating func writeBool(_ value: Bool) {
         writeByte(value ? 0xc3 : 0xc2)
@@ -24,6 +28,7 @@ extension MessagePackFormatSink {
 
     /// Writes a signed integer using the smallest format that represents it.
     /// Non-negative values use the unsigned family, as the spec recommends.
+    @inlinable
     @inline(__always)
     mutating func writeInt(_ value: Int64) {
         if value >= 0 {
@@ -46,6 +51,7 @@ extension MessagePackFormatSink {
     }
 
     /// Writes an unsigned integer using the smallest format that represents it.
+    @inlinable
     @inline(__always)
     mutating func writeUInt(_ value: UInt64) {
         if value <= 0x7f {
@@ -65,43 +71,52 @@ extension MessagePackFormatSink {
         }
     }
 
+    @inlinable
     @inline(__always)
     mutating func writeFloat(_ value: Float) {
         writeByte(0xca)
         writeBigEndian(value.bitPattern)
     }
 
+    @inlinable
     @inline(__always)
     mutating func writeDouble(_ value: Double) {
         writeByte(0xcb)
         writeBigEndian(value.bitPattern)
     }
 
+    @inlinable
+    @inline(__always)
+    mutating func writeStringHeader(byteCount length: Int) {
+        if length < 32 {
+            writeByte(0xa0 | UInt8(truncatingIfNeeded: length))
+        } else if length <= 0xff {
+            writeByte(0xd9)
+            writeByte(UInt8(truncatingIfNeeded: length))
+        } else if length <= 0xffff {
+            writeByte(0xda)
+            writeBigEndian(UInt16(truncatingIfNeeded: length))
+        } else {
+            precondition(
+                length <= 0xffff_ffff, "MessagePack strings are limited to 2^32-1 bytes")
+            writeByte(0xdb)
+            writeBigEndian(UInt32(truncatingIfNeeded: length))
+        }
+    }
+
+    @inlinable
     @inline(__always)
     mutating func writeString(_ s: String) {
         var string = s
         string.withUTF8 { utf8 in
-            let length = utf8.count
-            if length < 32 {
-                writeByte(0xa0 | UInt8(truncatingIfNeeded: length))
-            } else if length <= 0xff {
-                writeByte(0xd9)
-                writeByte(UInt8(truncatingIfNeeded: length))
-            } else if length <= 0xffff {
-                writeByte(0xda)
-                writeBigEndian(UInt16(truncatingIfNeeded: length))
-            } else {
-                precondition(
-                    length <= 0xffff_ffff, "MessagePack strings are limited to 2^32-1 bytes")
-                writeByte(0xdb)
-                writeBigEndian(UInt32(truncatingIfNeeded: length))
-            }
+            writeStringHeader(byteCount: utf8.count)
             if let baseAddress = utf8.baseAddress {
-                writeBytes(baseAddress, count: length)
+                writeBytes(baseAddress, count: utf8.count)
             }
         }
     }
 
+    @inlinable
     @inline(__always)
     mutating func writeBinary(_ d: Data) {
         let length = d.count
@@ -123,6 +138,7 @@ extension MessagePackFormatSink {
         }
     }
 
+    @inlinable
     @inline(__always)
     mutating func writeExt(type: Int8, data d: Data) {
         let length = d.count
@@ -154,6 +170,7 @@ extension MessagePackFormatSink {
         }
     }
 
+    @inlinable
     @inline(__always)
     mutating func writeArrayHeader(count: Int) {
         if count < 16 {
@@ -168,6 +185,7 @@ extension MessagePackFormatSink {
         }
     }
 
+    @inlinable
     @inline(__always)
     mutating func writeMapHeader(count: Int) {
         if count < 16 {
@@ -188,5 +206,125 @@ extension MessagePackFormatSink {
         if count < 16 { return 1 }
         if count <= 0xffff { return 3 }
         return 5
+    }
+}
+
+// MARK: - Value-tree writing
+
+/// A container being written by ``MessagePackFormatSink/write(_:)``. Arrays
+/// iterate `items` by `index`; maps iterate the dictionary by native index
+/// (no flattening allocation), with `pending` holding the value to emit after
+/// its key.
+struct MessagePackValueFrame {
+    let items: [MessagePackValue]
+    var index = 0
+    let map: [MessagePackValue: MessagePackValue]
+    var mapIndex: [MessagePackValue: MessagePackValue].Index
+    var pending: MessagePackValue?
+    let isMap: Bool
+
+    init(items: [MessagePackValue]) {
+        self.items = items
+        self.map = [:]
+        self.mapIndex = self.map.startIndex
+        self.pending = nil
+        self.isMap = false
+    }
+
+    init(map: [MessagePackValue: MessagePackValue]) {
+        self.items = []
+        self.map = map
+        self.mapIndex = map.startIndex
+        self.pending = nil
+        self.isMap = true
+    }
+}
+
+extension MessagePackFormatSink {
+    /// Writes a scalar, or writes a container header and pushes a frame
+    /// for its children.
+    @inline(__always)
+    mutating func writeValue(_ value: MessagePackValue, stack: inout [MessagePackValueFrame]) {
+        switch value {
+        case .nil:
+            writeByte(0xc0)
+        case .bool(let v):
+            writeByte(v ? 0xc3 : 0xc2)
+        case .int8(let v):
+            writeInt(Int64(v))
+        case .int16(let v):
+            writeInt(Int64(v))
+        case .int32(let v):
+            writeInt(Int64(v))
+        case .int64(let v):
+            writeInt(v)
+        case .uint8(let v):
+            writeUInt(UInt64(v))
+        case .uint16(let v):
+            writeUInt(UInt64(v))
+        case .uint32(let v):
+            writeUInt(UInt64(v))
+        case .uint64(let v):
+            writeUInt(v)
+        case .float32(let v):
+            writeFloat(v)
+        case .float64(let v):
+            writeDouble(v)
+        case .string(let s):
+            writeString(s)
+        case .binary(let d):
+            writeBinary(d)
+        case .array(let elements):
+            writeArrayHeader(count: elements.count)
+            if !elements.isEmpty { stack.append(MessagePackValueFrame(items: elements)) }
+        case .map(let entries):
+            writeMapHeader(count: entries.count)
+            if !entries.isEmpty { stack.append(MessagePackValueFrame(map: entries)) }
+        case .ext(let type, let d):
+            writeExt(type: type, data: d)
+        }
+    }
+
+    /// Writes a whole value tree iteratively (no recursion), so hostile or
+    /// extremely deep trees cannot overflow the call stack.
+    mutating func write(_ root: MessagePackValue) {
+        var stack: [MessagePackValueFrame] = []
+        writeValue(root, stack: &stack)
+        while !stack.isEmpty {
+            let top = stack.count - 1
+            if stack[top].isMap {
+                if let pending = stack[top].pending {
+                    stack[top].pending = nil
+                    writeValue(pending, stack: &stack)
+                    continue
+                }
+                let index = stack[top].mapIndex
+                guard index != stack[top].map.endIndex else {
+                    stack.removeLast()
+                    continue
+                }
+                stack[top].mapIndex = stack[top].map.index(after: index)
+                let entry = stack[top].map[index]
+                stack[top].pending = entry.value
+                writeValue(entry.key, stack: &stack)
+            } else {
+                // Emit consecutive children in a tight loop, breaking only
+                // when a child pushes a nested container frame.
+                let items = stack[top].items
+                let count = items.count
+                var index = stack[top].index
+                while index < count {
+                    let child = items[index]
+                    index += 1
+                    writeValue(child, stack: &stack)
+                    if stack.count != top + 1 { break }
+                }
+                if index == count && stack.count == top + 1 {
+                    stack.removeLast()
+                } else {
+                    stack[top].index = index
+                }
+            }
+        }
     }
 }
