@@ -153,14 +153,32 @@ struct MessagePackEncoderState {
 
     /// Per-`_MessagePackEncoder` record of the container it created, so
     /// repeated `container(keyedBy:)` / `unkeyedContainer()` calls on the
-    /// same encoder merge into one container instead of emitting siblings.
-    /// `0` = none; `position + 1` = keyed; `-(position + 1)` = unkeyed.
+    /// same encoder merge into one container instead of emitting siblings,
+    /// and so encoding a second value for the same slot is detected.
+    /// `0` = none; `position + 1` = keyed; `-(position + 1)` = unkeyed;
+    /// `singleValueWrittenMarker` = a single value was already written.
     var encoderSlots: [Int] = []
+
+    /// Slot marker meaning "a single value was already encoded for this
+    /// encoder" (distinct from any container position encoding).
+    static let singleValueWrittenMarker = Int.min
 
     @inline(__always)
     mutating func makeEncoderSlot() -> Int {
         encoderSlots.append(0)
         return encoderSlots.count - 1
+    }
+
+    /// Records that the encoder's single value was written; traps if a
+    /// value or container was already encoded for it, mirroring
+    /// `JSONEncoder`'s precondition for the same misuse.
+    @inline(__always)
+    mutating func markSingleValueWritten(id: Int) {
+        precondition(
+            encoderSlots[id] == 0,
+            "Attempt to encode a second value (or a value after a container) through a single value encoding container"
+        )
+        encoderSlots[id] = Self.singleValueWrittenMarker
     }
 
     /// Registers one new entry in the container at `position`, closing any
@@ -334,6 +352,10 @@ struct _MessagePackEncoder: Encoder {
             impl.state.pointee.encoderSlots[id] = isMap ? position + 1 : -(position + 1)
             return position
         }
+        precondition(
+            slot != MessagePackEncoderState.singleValueWrittenMarker,
+            "Attempt to request an encoding container after a single value was already encoded for the same value"
+        )
         let existingIsMap = slot > 0
         precondition(
             existingIsMap == isMap,
@@ -361,7 +383,7 @@ struct _MessagePackEncoder: Encoder {
     }
 
     func singleValueContainer() -> SingleValueEncodingContainer {
-        MessagePackSingleValueEncodingContainer(impl: impl, codingPath: codingPath)
+        MessagePackSingleValueEncodingContainer(impl: impl, codingPath: codingPath, encoderID: id)
     }
 }
 
@@ -424,7 +446,8 @@ struct MessagePackDeferredSingleValueEncodingContainer: SingleValueEncodingConta
 
     @inline(__always)
     private func begin() -> UnsafeMutablePointer<MessagePackEncoderState> {
-        _ = owner.activate()
+        let inner = owner.activate()
+        owner.impl.state.pointee.markSingleValueWritten(id: inner.id)
         return owner.impl.state
     }
 
@@ -445,7 +468,7 @@ struct MessagePackDeferredSingleValueEncodingContainer: SingleValueEncodingConta
     mutating func encode(_ value: UInt64) throws { begin().pointee.buffer.writeUInt(value) }
 
     mutating func encode<T: Encodable>(_ value: T) throws {
-        _ = owner.activate()
+        _ = begin()
         try owner.impl.encodeEncodable(value, codingPath: owner.codingPath)
     }
 }
@@ -717,24 +740,92 @@ struct MessagePackUnkeyedEncodingContainer: UnkeyedEncodingContainer {
 struct MessagePackSingleValueEncodingContainer: SingleValueEncodingContainer {
     let impl: MessagePackEncoderImpl
     let codingPath: [CodingKey]
+    let encoderID: Int
 
-    mutating func encodeNil() throws { impl.state.pointee.buffer.writeNil() }
-    mutating func encode(_ value: Bool) throws { impl.state.pointee.buffer.writeBool(value) }
-    mutating func encode(_ value: String) throws { impl.state.pointee.buffer.writeString(value) }
-    mutating func encode(_ value: Double) throws { impl.state.pointee.buffer.writeDouble(value) }
-    mutating func encode(_ value: Float) throws { impl.state.pointee.buffer.writeFloat(value) }
-    mutating func encode(_ value: Int) throws { impl.state.pointee.buffer.writeInt(Int64(value)) }
-    mutating func encode(_ value: Int8) throws { impl.state.pointee.buffer.writeInt(Int64(value)) }
-    mutating func encode(_ value: Int16) throws { impl.state.pointee.buffer.writeInt(Int64(value)) }
-    mutating func encode(_ value: Int32) throws { impl.state.pointee.buffer.writeInt(Int64(value)) }
-    mutating func encode(_ value: Int64) throws { impl.state.pointee.buffer.writeInt(value) }
-    mutating func encode(_ value: UInt) throws { impl.state.pointee.buffer.writeUInt(UInt64(value)) }
-    mutating func encode(_ value: UInt8) throws { impl.state.pointee.buffer.writeUInt(UInt64(value)) }
-    mutating func encode(_ value: UInt16) throws { impl.state.pointee.buffer.writeUInt(UInt64(value)) }
-    mutating func encode(_ value: UInt32) throws { impl.state.pointee.buffer.writeUInt(UInt64(value)) }
-    mutating func encode(_ value: UInt64) throws { impl.state.pointee.buffer.writeUInt(value) }
+    /// Marks the owning encoder's slot as consumed so a second encode (or a
+    /// container request) for the same value traps, like `JSONEncoder`.
+    @inline(__always)
+    private func beginValue() {
+        impl.state.pointee.markSingleValueWritten(id: encoderID)
+    }
+
+    mutating func encodeNil() throws {
+        beginValue()
+        impl.state.pointee.buffer.writeNil()
+    }
+
+    mutating func encode(_ value: Bool) throws {
+        beginValue()
+        impl.state.pointee.buffer.writeBool(value)
+    }
+
+    mutating func encode(_ value: String) throws {
+        beginValue()
+        impl.state.pointee.buffer.writeString(value)
+    }
+
+    mutating func encode(_ value: Double) throws {
+        beginValue()
+        impl.state.pointee.buffer.writeDouble(value)
+    }
+
+    mutating func encode(_ value: Float) throws {
+        beginValue()
+        impl.state.pointee.buffer.writeFloat(value)
+    }
+
+    mutating func encode(_ value: Int) throws {
+        beginValue()
+        impl.state.pointee.buffer.writeInt(Int64(value))
+    }
+
+    mutating func encode(_ value: Int8) throws {
+        beginValue()
+        impl.state.pointee.buffer.writeInt(Int64(value))
+    }
+
+    mutating func encode(_ value: Int16) throws {
+        beginValue()
+        impl.state.pointee.buffer.writeInt(Int64(value))
+    }
+
+    mutating func encode(_ value: Int32) throws {
+        beginValue()
+        impl.state.pointee.buffer.writeInt(Int64(value))
+    }
+
+    mutating func encode(_ value: Int64) throws {
+        beginValue()
+        impl.state.pointee.buffer.writeInt(value)
+    }
+
+    mutating func encode(_ value: UInt) throws {
+        beginValue()
+        impl.state.pointee.buffer.writeUInt(UInt64(value))
+    }
+
+    mutating func encode(_ value: UInt8) throws {
+        beginValue()
+        impl.state.pointee.buffer.writeUInt(UInt64(value))
+    }
+
+    mutating func encode(_ value: UInt16) throws {
+        beginValue()
+        impl.state.pointee.buffer.writeUInt(UInt64(value))
+    }
+
+    mutating func encode(_ value: UInt32) throws {
+        beginValue()
+        impl.state.pointee.buffer.writeUInt(UInt64(value))
+    }
+
+    mutating func encode(_ value: UInt64) throws {
+        beginValue()
+        impl.state.pointee.buffer.writeUInt(value)
+    }
 
     mutating func encode<T: Encodable>(_ value: T) throws {
+        beginValue()
         try impl.encodeEncodable(value, codingPath: codingPath)
     }
 }
