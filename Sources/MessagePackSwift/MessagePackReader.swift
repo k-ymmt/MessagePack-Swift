@@ -131,6 +131,45 @@ public struct MessagePackReader: ~Copyable {
         return value
     }
 
+    /// Reads a map key (a string value) and hands its raw UTF-8 bytes to
+    /// `match` without materializing a `String`, returning `match`'s result.
+    ///
+    /// Generated `init(messagePack:)` implementations use this to match
+    /// field names by direct byte comparison (see ``key(_:matches:)``).
+    /// When `match` returns `nil` (unknown key), the bytes are validated so
+    /// malformed keys still throw ``MessagePackError/invalidUTF8`` exactly
+    /// like ``readString()`` would; a matched key is byte-equal to a known
+    /// valid key and needs no validation. Throws
+    /// ``MessagePackError/typeMismatch(expected:format:)`` if the next value
+    /// is not a string, leaving the reader positioned at that value.
+    @inlinable
+    public mutating func readKey(
+        matchedBy match: (UnsafeBufferPointer<UInt8>) -> Int?
+    ) throws(MessagePackError) -> Int? {
+        guard let bytes = try parser.readRawStringBytes() else {
+            throw MessagePackError.typeMismatch(expected: "string", format: try parser.peekFormat())
+        }
+        guard let index = match(bytes) else {
+            guard messagePackMakeString(bytes) != nil else {
+                throw MessagePackError.invalidUTF8
+            }
+            return nil
+        }
+        return index
+    }
+
+    /// Whether `bytes` are exactly the UTF-8 bytes of `key`. Used by
+    /// generated code inside a ``readKey(matchedBy:)`` closure to match a
+    /// wire key against a field name known at compile time.
+    @inlinable
+    public static func key(_ bytes: UnsafeBufferPointer<UInt8>, matches key: StaticString) -> Bool {
+        key.withUTF8Buffer { expected in
+            bytes.count == expected.count
+                && (bytes.isEmpty
+                    || memcmp(bytes.baseAddress!, expected.baseAddress!, bytes.count) == 0)
+        }
+    }
+
     // MARK: Containers and extensions
 
     /// Reads an array header, enters the container, and returns the element

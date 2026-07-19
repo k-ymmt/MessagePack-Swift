@@ -41,10 +41,18 @@ final class MessagePackSerializableMacroTests: XCTestCase {
                         var _msgpack_hoge: Optional<String> = nil
                         let _msgpackEntryCount = try reader.readMapHeader()
                         for _ in 0 ..< _msgpackEntryCount {
-                            switch try reader.readString() {
-                            case "bar":
+                            switch try reader.readKey(matchedBy: { _msgpackKey in
+                                if MessagePackSwift.MessagePackReader.key(_msgpackKey, matches: "bar") {
+                                    return 0
+                                }
+                                if MessagePackSwift.MessagePackReader.key(_msgpackKey, matches: "hoge") {
+                                    return 1
+                                }
+                                return nil
+                            }) {
+                            case 0:
                                 _msgpack_bar = .some(try Int(messagePack: &reader))
-                            case "hoge":
+                            case 1:
                                 _msgpack_hoge = .some(try String(messagePack: &reader))
                             default:
                                 try reader.skipValue()
@@ -97,10 +105,18 @@ final class MessagePackSerializableMacroTests: XCTestCase {
                         var _msgpack_count: Optional<Int> = nil
                         let _msgpackEntryCount = try reader.readMapHeader()
                         for _ in 0 ..< _msgpackEntryCount {
-                            switch try reader.readString() {
-                            case "name":
+                            switch try reader.readKey(matchedBy: { _msgpackKey in
+                                if MessagePackSwift.MessagePackReader.key(_msgpackKey, matches: "name") {
+                                    return 0
+                                }
+                                if MessagePackSwift.MessagePackReader.key(_msgpackKey, matches: "count") {
+                                    return 1
+                                }
+                                return nil
+                            }) {
+                            case 0:
                                 _msgpack_name = .some(try Optional<String>(messagePack: &reader))
-                            case "count":
+                            case 1:
                                 _msgpack_count = .some(try Int(messagePack: &reader))
                             default:
                                 try reader.skipValue()
@@ -146,8 +162,13 @@ final class MessagePackSerializableMacroTests: XCTestCase {
                         var _msgpack_name: Optional<String> = nil
                         let _msgpackEntryCount = try reader.readMapHeader()
                         for _ in 0 ..< _msgpackEntryCount {
-                            switch try reader.readString() {
-                            case "n":
+                            switch try reader.readKey(matchedBy: { _msgpackKey in
+                                if MessagePackSwift.MessagePackReader.key(_msgpackKey, matches: "n") {
+                                    return 0
+                                }
+                                return nil
+                            }) {
+                            case 0:
                                 _msgpack_name = .some(try String(messagePack: &reader))
                             default:
                                 try reader.skipValue()
@@ -195,10 +216,18 @@ final class MessagePackSerializableMacroTests: XCTestCase {
                         var _msgpack_second: Optional<[B]> = nil
                         let _msgpackEntryCount = try reader.readMapHeader()
                         for _ in 0 ..< _msgpackEntryCount {
-                            switch try reader.readString() {
-                            case "first":
+                            switch try reader.readKey(matchedBy: { _msgpackKey in
+                                if MessagePackSwift.MessagePackReader.key(_msgpackKey, matches: "first") {
+                                    return 0
+                                }
+                                if MessagePackSwift.MessagePackReader.key(_msgpackKey, matches: "second") {
+                                    return 1
+                                }
+                                return nil
+                            }) {
+                            case 0:
                                 _msgpack_first = .some(try A(messagePack: &reader))
-                            case "second":
+                            case 1:
                                 _msgpack_second = .some(try [B](messagePack: &reader))
                             default:
                                 try reader.skipValue()
@@ -246,8 +275,13 @@ final class MessagePackSerializableMacroTests: XCTestCase {
                         var _msgpack_a: Optional<Int> = nil
                         let _msgpackEntryCount = try reader.readMapHeader()
                         for _ in 0 ..< _msgpackEntryCount {
-                            switch try reader.readString() {
-                            case "a":
+                            switch try reader.readKey(matchedBy: { _msgpackKey in
+                                if MessagePackSwift.MessagePackReader.key(_msgpackKey, matches: "a") {
+                                    return 0
+                                }
+                                return nil
+                            }) {
+                            case 0:
                                 _msgpack_a = .some(try Int(messagePack: &reader))
                             default:
                                 try reader.skipValue()
@@ -459,8 +493,13 @@ final class MessagePackSerializableMacroTests: XCTestCase {
                         var _msgpack_kept: Optional<Int> = nil
                         let _msgpackEntryCount = try reader.readMapHeader()
                         for _ in 0 ..< _msgpackEntryCount {
-                            switch try reader.readString() {
-                            case "kept":
+                            switch try reader.readKey(matchedBy: { _msgpackKey in
+                                if MessagePackSwift.MessagePackReader.key(_msgpackKey, matches: "kept") {
+                                    return 0
+                                }
+                                return nil
+                            }) {
+                            case 0:
                                 _msgpack_kept = .some(try Int(messagePack: &reader))
                             default:
                                 try reader.skipValue()

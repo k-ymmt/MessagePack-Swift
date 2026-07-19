@@ -350,6 +350,37 @@ extension MessagePackSerializer.Parser {
         }
     }
 
+    /// Reads any string format and returns its raw UTF-8 bytes (not
+    /// validated, not copied; only valid while the input buffer is), or
+    /// rewinds and returns `nil` if the next value is not a string.
+    @inlinable
+    @inline(__always)
+    mutating func readRawStringBytes() throws(MessagePackError) -> UnsafeBufferPointer<UInt8>? {
+        let start = offset
+        let format = try readFormatByte()
+        let length: Int
+        switch format {
+        case 0xa0...0xbf:
+            length = Int(format & 0x1f)
+        case 0xd9:
+            length = Int(try readBigEndian(UInt8.self))
+        case 0xda:
+            length = Int(try readBigEndian(UInt16.self))
+        case 0xdb:
+            length = Int(try readBigEndian(UInt32.self))
+        default:
+            offset = start
+            return nil
+        }
+        guard count - offset >= length, let base else { throw MessagePackError.insufficientData }
+        let bytes = UnsafeBufferPointer(
+            start: (base + offset).assumingMemoryBound(to: UInt8.self),
+            count: length
+        )
+        offset += length
+        return bytes
+    }
+
     @inlinable
     @inline(__always)
     mutating func readRawBinary() throws(MessagePackError) -> Data? {

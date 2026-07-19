@@ -202,9 +202,18 @@ public struct MessagePackSerializableMacro: ExtensionMacro {
             }
             lines.append("    let _msgpackEntryCount = try reader.readMapHeader()")
             lines.append("    for _ in 0 ..< _msgpackEntryCount {")
-            lines.append("        switch try reader.readString() {")
-            for field in decodable {
-                lines.append("        case \(literal(field.key)):")
+            lines.append("        switch try reader.readKey(matchedBy: { _msgpackKey in")
+            for (index, field) in decodable.enumerated() {
+                lines.append(
+                    "            if MessagePackSwift.MessagePackReader.key(_msgpackKey, matches: \(literal(field.key))) {"
+                )
+                lines.append("                return \(index)")
+                lines.append("            }")
+            }
+            lines.append("            return nil")
+            lines.append("        }) {")
+            for (index, field) in decodable.enumerated() {
+                lines.append("        case \(index):")
                 lines.append(
                     "            _msgpack_\(field.name) = .some(try \(field.constructor!)(messagePack: &reader))"
                 )
