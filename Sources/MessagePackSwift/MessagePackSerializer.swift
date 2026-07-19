@@ -187,8 +187,9 @@ extension MessagePackSerializer {
 extension MessagePackSerializer {
     /// Writes a value tree into a pre-sized raw buffer iteratively. All
     /// validation (lengths) happened during the size pass, so writing never
-    /// fails and never recurses.
-    struct Writer {
+    /// fails and never recurses. The wire-format emission logic lives in
+    /// ``MessagePackFormatSink`` and is shared with ``MessagePackEncoder``.
+    struct Writer: MessagePackFormatSink {
         let base: UnsafeMutableRawPointer
         var offset = 0
 
@@ -208,118 +209,6 @@ extension MessagePackSerializer {
         mutating func writeBytes(_ pointer: UnsafeRawPointer, count: Int) {
             base.advanced(by: offset).copyMemory(from: pointer, byteCount: count)
             offset += count
-        }
-
-        @inline(__always)
-        mutating func writeInt(_ value: Int64) {
-            if value >= 0 {
-                writeUInt(UInt64(bitPattern: value))
-            } else if value >= -32 {
-                writeByte(UInt8(truncatingIfNeeded: value))
-            } else if value >= Int64(Int8.min) {
-                writeByte(0xd0)
-                writeByte(UInt8(truncatingIfNeeded: value))
-            } else if value >= Int64(Int16.min) {
-                writeByte(0xd1)
-                writeBigEndian(Int16(truncatingIfNeeded: value))
-            } else if value >= Int64(Int32.min) {
-                writeByte(0xd2)
-                writeBigEndian(Int32(truncatingIfNeeded: value))
-            } else {
-                writeByte(0xd3)
-                writeBigEndian(value)
-            }
-        }
-
-        @inline(__always)
-        mutating func writeUInt(_ value: UInt64) {
-            if value <= 0x7f {
-                writeByte(UInt8(truncatingIfNeeded: value))
-            } else if value <= 0xff {
-                writeByte(0xcc)
-                writeByte(UInt8(truncatingIfNeeded: value))
-            } else if value <= 0xffff {
-                writeByte(0xcd)
-                writeBigEndian(UInt16(truncatingIfNeeded: value))
-            } else if value <= 0xffff_ffff {
-                writeByte(0xce)
-                writeBigEndian(UInt32(truncatingIfNeeded: value))
-            } else {
-                writeByte(0xcf)
-                writeBigEndian(value)
-            }
-        }
-
-        @inline(__always)
-        mutating func writeString(_ s: String) {
-            var string = s
-            string.withUTF8 { utf8 in
-                let length = utf8.count
-                if length < 32 {
-                    writeByte(0xa0 | UInt8(truncatingIfNeeded: length))
-                } else if length <= 0xff {
-                    writeByte(0xd9)
-                    writeByte(UInt8(truncatingIfNeeded: length))
-                } else if length <= 0xffff {
-                    writeByte(0xda)
-                    writeBigEndian(UInt16(truncatingIfNeeded: length))
-                } else {
-                    writeByte(0xdb)
-                    writeBigEndian(UInt32(truncatingIfNeeded: length))
-                }
-                if let baseAddress = utf8.baseAddress {
-                    writeBytes(baseAddress, count: length)
-                }
-            }
-        }
-
-        @inline(__always)
-        mutating func writeBinary(_ d: Data) {
-            let length = d.count
-            if length <= 0xff {
-                writeByte(0xc4)
-                writeByte(UInt8(truncatingIfNeeded: length))
-            } else if length <= 0xffff {
-                writeByte(0xc5)
-                writeBigEndian(UInt16(truncatingIfNeeded: length))
-            } else {
-                writeByte(0xc6)
-                writeBigEndian(UInt32(truncatingIfNeeded: length))
-            }
-            d.withUnsafeBytes { bytes in
-                if let baseAddress = bytes.baseAddress {
-                    writeBytes(baseAddress, count: bytes.count)
-                }
-            }
-        }
-
-        @inline(__always)
-        mutating func writeExt(type: Int8, data d: Data) {
-            let length = d.count
-            switch length {
-            case 1: writeByte(0xd4)
-            case 2: writeByte(0xd5)
-            case 4: writeByte(0xd6)
-            case 8: writeByte(0xd7)
-            case 16: writeByte(0xd8)
-            default:
-                if length <= 0xff {
-                    writeByte(0xc7)
-                    writeByte(UInt8(truncatingIfNeeded: length))
-                } else if length <= 0xffff {
-                    writeByte(0xc8)
-                    writeBigEndian(UInt16(truncatingIfNeeded: length))
-                } else {
-                    writeByte(0xc9)
-                    writeBigEndian(UInt32(truncatingIfNeeded: length))
-                }
-            }
-            writeByte(UInt8(bitPattern: type))
-            d.withUnsafeBytes { bytes in
-                if let baseAddress = bytes.baseAddress {
-                    writeBytes(baseAddress, count: bytes.count)
-                }
-            }
         }
 
         /// A container being written. Arrays iterate `items` by `index`; maps
@@ -376,39 +265,19 @@ extension MessagePackSerializer {
             case .uint64(let v):
                 writeUInt(v)
             case .float32(let v):
-                writeByte(0xca)
-                writeBigEndian(v.bitPattern)
+                writeFloat(v)
             case .float64(let v):
-                writeByte(0xcb)
-                writeBigEndian(v.bitPattern)
+                writeDouble(v)
             case .string(let s):
                 writeString(s)
             case .binary(let d):
                 writeBinary(d)
             case .array(let elements):
-                let count = elements.count
-                if count < 16 {
-                    writeByte(0x90 | UInt8(truncatingIfNeeded: count))
-                } else if count <= 0xffff {
-                    writeByte(0xdc)
-                    writeBigEndian(UInt16(truncatingIfNeeded: count))
-                } else {
-                    writeByte(0xdd)
-                    writeBigEndian(UInt32(truncatingIfNeeded: count))
-                }
-                if count > 0 { stack.append(Frame(items: elements)) }
+                writeArrayHeader(count: elements.count)
+                if !elements.isEmpty { stack.append(Frame(items: elements)) }
             case .map(let entries):
-                let count = entries.count
-                if count < 16 {
-                    writeByte(0x80 | UInt8(truncatingIfNeeded: count))
-                } else if count <= 0xffff {
-                    writeByte(0xde)
-                    writeBigEndian(UInt16(truncatingIfNeeded: count))
-                } else {
-                    writeByte(0xdf)
-                    writeBigEndian(UInt32(truncatingIfNeeded: count))
-                }
-                if count > 0 { stack.append(Frame(map: entries)) }
+                writeMapHeader(count: entries.count)
+                if !entries.isEmpty { stack.append(Frame(map: entries)) }
             case .ext(let type, let d):
                 writeExt(type: type, data: d)
             }

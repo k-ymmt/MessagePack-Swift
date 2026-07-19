@@ -44,6 +44,34 @@ private func serialized(_ value: MessagePackValue) -> Data {
     try! MessagePackSerializer.serialize(value: value)
 }
 
+// MARK: - Codable fixtures
+
+private struct Person: Codable {
+    var id: Int
+    var name: String
+    var email: String?
+    var isActive: Bool
+    var score: Double
+    var tags: [String]
+}
+
+private let people = (0..<1_000).map {
+    Person(
+        id: $0,
+        name: "person number \($0)",
+        email: $0 % 3 == 0 ? nil : "person\($0)@example.com",
+        isActive: $0 % 2 == 0,
+        score: Double($0) * 0.5,
+        tags: ["tag\($0 % 5)", "tag\($0 % 7)"]
+    )
+}
+
+private let intValues = (0..<10_000).map { $0 * 31 - 5_000 }
+
+private let peopleMsgPackData = try! MessagePackEncoder().encode(people)
+private let peopleJSONData = try! JSONEncoder().encode(people)
+private let intValuesMsgPackData = try! MessagePackEncoder().encode(intValues)
+
 private let smallIntArrayData = serialized(smallIntArray)
 private let largeIntArrayData = serialized(largeIntArray)
 private let doubleArrayData = serialized(doubleArray)
@@ -148,6 +176,58 @@ let benchmarks: @Sendable () -> Void = {
         for _ in benchmark.scaledIterations {
             let data = try MessagePackSerializer.serialize(value: nestedValue)
             blackHole(try MessagePackSerializer.deserialize(data: data))
+        }
+    }
+
+    Benchmark("codable encode: structs (1k)") { benchmark in
+        let encoder = MessagePackEncoder()
+        for _ in benchmark.scaledIterations {
+            blackHole(try encoder.encode(people))
+        }
+    }
+
+    Benchmark("codable decode: structs (1k)") { benchmark in
+        let decoder = MessagePackDecoder()
+        for _ in benchmark.scaledIterations {
+            blackHole(try decoder.decode([Person].self, from: peopleMsgPackData))
+        }
+    }
+
+    Benchmark("codable encode: int array (10k)") { benchmark in
+        let encoder = MessagePackEncoder()
+        for _ in benchmark.scaledIterations {
+            blackHole(try encoder.encode(intValues))
+        }
+    }
+
+    Benchmark("codable decode: int array (10k)") { benchmark in
+        let decoder = MessagePackDecoder()
+        for _ in benchmark.scaledIterations {
+            blackHole(try decoder.decode([Int].self, from: intValuesMsgPackData))
+        }
+    }
+
+    Benchmark("codable round trip: structs (1k)") { benchmark in
+        let encoder = MessagePackEncoder()
+        let decoder = MessagePackDecoder()
+        for _ in benchmark.scaledIterations {
+            let data = try encoder.encode(people)
+            blackHole(try decoder.decode([Person].self, from: data))
+        }
+    }
+
+    // Reference points: Foundation JSON coders on the same fixtures.
+    Benchmark("reference JSONEncoder: structs (1k)") { benchmark in
+        let encoder = JSONEncoder()
+        for _ in benchmark.scaledIterations {
+            blackHole(try encoder.encode(people))
+        }
+    }
+
+    Benchmark("reference JSONDecoder: structs (1k)") { benchmark in
+        let decoder = JSONDecoder()
+        for _ in benchmark.scaledIterations {
+            blackHole(try decoder.decode([Person].self, from: peopleJSONData))
         }
     }
 }

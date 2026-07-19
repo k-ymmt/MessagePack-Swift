@@ -81,6 +81,35 @@ public struct MessagePackTimestamp: Sendable, Equatable, Hashable {
     }
 }
 
+extension MessagePackTimestamp: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case seconds
+        case nanoseconds
+    }
+
+    /// Generic `Codable` fallback used by coders other than
+    /// ``MessagePackEncoder``/``MessagePackDecoder`` (which encode this type
+    /// natively as the timestamp extension): a keyed container with
+    /// `seconds` and `nanoseconds`.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let seconds = try container.decode(Int64.self, forKey: .seconds)
+        let nanoseconds = try container.decodeIfPresent(UInt32.self, forKey: .nanoseconds) ?? 0
+        guard nanoseconds < 1_000_000_000 else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .nanoseconds, in: container,
+                debugDescription: "nanoseconds must be less than 1_000_000_000")
+        }
+        self.init(seconds: seconds, nanoseconds: nanoseconds)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(seconds, forKey: .seconds)
+        try container.encode(nanoseconds, forKey: .nanoseconds)
+    }
+}
+
 extension MessagePackTimestamp {
     /// Creates a timestamp from a `Date`, rounding to nanosecond precision.
     public init(date: Date) {

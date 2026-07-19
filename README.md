@@ -18,6 +18,59 @@ let decoded = try MessagePackSerializer.deserialize(data: data)
 
 Both APIs use typed throws (`throws(MessagePackError)`).
 
+## Codable
+
+`MessagePackEncoder` / `MessagePackDecoder` mirror `JSONEncoder` / `JSONDecoder`:
+
+```swift
+struct Person: Codable {
+    var id: Int
+    var name: String
+    var tags: [String]
+}
+
+let data = try MessagePackEncoder().encode(Person(id: 1, name: "Alice", tags: ["a"]))
+let person = try MessagePackDecoder().decode(Person.self, from: data)
+```
+
+- Keyed containers become maps with string keys; maps with integer wire keys
+  can be decoded through `CodingKey.intValue`.
+- `Date` ↔ the spec's timestamp extension (ext type -1; numeric seconds are
+  also accepted when decoding), `Data` ↔ bin 8/16/32, and
+  `MessagePackTimestamp` ↔ ext type -1.
+- Integers encode with the smallest wire format and decode from any integer
+  format that fits the requested type.
+- Encoder output is byte-identical to `MessagePackSerializer.serialize` of
+  the equivalent value tree (smallest headers everywhere).
+
+### Codable performance
+
+Neither direction materializes a `MessagePackValue` tree:
+
+- **Encoding** streams bytes into a growable buffer in a single pass.
+  Container headers (counts unknown up front) are reserved at full width,
+  counts are accumulated in the reserved bytes themselves, and headers are
+  compacted to the smallest format in one final pass.
+- **Decoding** walks the raw bytes directly. A keyed container scans its
+  entries' byte offsets once and matches coding keys by comparing UTF-8
+  bytes in place (no key `String` allocations), starting each lookup at the
+  previous match so keys requested in wire order cost O(1). Container scans
+  are memoized so a decoded value is never skipped twice.
+- Hot paths avoid allocation: index coding keys build their `stringValue`
+  lazily, decode primitives report failures via typed throws and attach
+  coding-path context only when an error actually propagates, and the
+  encoder's buffer sits behind a pointer to bypass dynamic exclusivity
+  checks.
+
+p50 wall clock, same machine as below, 1k-element array of a 6-field struct:
+
+| Workload | MessagePackEncoder/Decoder | Foundation JSONEncoder/Decoder |
+|---|---|---|
+| encode structs (1k) | 784 µs | 1.69 ms |
+| decode structs (1k) | 1.58 ms | 2.30 ms |
+| encode int array (10k) | 1.19 ms | — |
+| decode int array (10k) | 1.61 ms | — |
+
 ## Design notes
 
 - **Spec compliance**: All format families are supported (fixint, fixmap, fixarray, fixstr, nil, bool, bin 8/16/32, ext 8/16/32, float 32/64, uint/int 8–64, fixext 1–16, str 8/16/32, array 16/32, map 16/32). The reserved byte `0xc1` and invalid UTF-8 in strings are rejected. Timestamps round-trip through `.ext(type: -1, ...)`.
@@ -56,4 +109,4 @@ Serialization performs 4 allocations total for flat payloads of any size (size-p
 swift test
 ```
 
-46 tests cover every format's byte-level encoding, boundary values (fixint/str/bin/array/map size class edges), Unicode, error paths (truncation, reserved bytes, invalid UTF-8, trailing bytes, depth limit), and round-trip fidelity.
+102 tests cover every format's byte-level encoding, boundary values (fixint/str/bin/array/map size class edges), Unicode, error paths (truncation, reserved bytes, invalid UTF-8, trailing bytes, depth limit), round-trip fidelity, and the Codable layer (scalar extremes, nested/optional/enum/dictionary round trips, serializer interop, class inheritance via `superEncoder`, manual keyed/unkeyed/nested containers, and decoding errors).

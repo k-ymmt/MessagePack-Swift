@@ -16,6 +16,12 @@ extension MessagePackSerializer {
             self.count = buffer.count
         }
 
+        init(base: UnsafeRawPointer?, count: Int, offset: Int = 0) {
+            self.base = base
+            self.count = count
+            self.offset = offset
+        }
+
         /// A partially parsed container. Map entries are accumulated as
         /// alternating key/value items and assembled on completion.
         struct Frame {
@@ -42,7 +48,7 @@ extension MessagePackSerializer {
         }
 
         @inline(__always)
-        mutating func readString(length: Int) throws(MessagePackError) -> MessagePackValue {
+        mutating func readString(length: Int) throws(MessagePackError) -> String {
             guard count - offset >= length, let base else { throw MessagePackError.insufficientData }
             let bytes = UnsafeBufferPointer(
                 start: (base + offset).assumingMemoryBound(to: UInt8.self),
@@ -55,12 +61,12 @@ extension MessagePackSerializer {
                 guard let span = try? UTF8Span(validating: bytes.span) else {
                     throw MessagePackError.invalidUTF8
                 }
-                return .string(String(copying: span))
+                return String(copying: span)
             } else {
                 guard let string = String(validating: bytes, as: UTF8.self) else {
                     throw MessagePackError.invalidUTF8
                 }
-                return .string(string)
+                return string
             }
         }
 
@@ -91,7 +97,7 @@ extension MessagePackSerializer {
                 case 0xe0...0xff:  // negative fixint
                     value = .int8(Int8(bitPattern: format))
                 case 0xa0...0xbf:  // fixstr
-                    value = try readString(length: Int(format & 0x1f))
+                    value = .string(try readString(length: Int(format & 0x1f)))
                 case 0xc0:
                     value = .nil
                 case 0xc2:
@@ -141,11 +147,11 @@ extension MessagePackSerializer {
                 case 0xd8:  // fixext 16
                     value = try readExt(length: 16)
                 case 0xd9:  // str 8
-                    value = try readString(length: Int(try readBigEndian(UInt8.self)))
+                    value = .string(try readString(length: Int(try readBigEndian(UInt8.self))))
                 case 0xda:  // str 16
-                    value = try readString(length: Int(try readBigEndian(UInt16.self)))
+                    value = .string(try readString(length: Int(try readBigEndian(UInt16.self))))
                 case 0xdb:  // str 32
-                    value = try readString(length: Int(try readBigEndian(UInt32.self)))
+                    value = .string(try readString(length: Int(try readBigEndian(UInt32.self))))
                 case 0x90...0x9f, 0xdc, 0xdd:  // fixarray, array 16, array 32
                     let elementCount: Int
                     switch format {
@@ -218,6 +224,258 @@ extension MessagePackSerializer {
                         value = .array(frame.items)
                     }
                 }
+            }
+        }
+    }
+}
+
+// MARK: - Direct-decoding primitives (shared with MessagePackDecoder)
+
+/// An integer read from the wire, preserving whether it came from a signed or
+/// unsigned format family.
+enum MessagePackRawInteger {
+    case signed(Int64)
+    case unsigned(UInt64)
+}
+
+extension MessagePackSerializer.Parser {
+    /// Reads any integer format and returns it, or rewinds and returns `nil`
+    /// if the next value is not an integer.
+    @inline(__always)
+    mutating func readRawInteger() throws(MessagePackError) -> MessagePackRawInteger? {
+        let start = offset
+        let format = try readFormatByte()
+        switch format {
+        case 0x00...0x7f:
+            return .unsigned(UInt64(format))
+        case 0xe0...0xff:
+            return .signed(Int64(Int8(bitPattern: format)))
+        case 0xcc:
+            return .unsigned(UInt64(try readBigEndian(UInt8.self)))
+        case 0xcd:
+            return .unsigned(UInt64(try readBigEndian(UInt16.self)))
+        case 0xce:
+            return .unsigned(UInt64(try readBigEndian(UInt32.self)))
+        case 0xcf:
+            return .unsigned(try readBigEndian(UInt64.self))
+        case 0xd0:
+            return .signed(Int64(Int8(bitPattern: try readBigEndian(UInt8.self))))
+        case 0xd1:
+            return .signed(Int64(Int16(bitPattern: try readBigEndian(UInt16.self))))
+        case 0xd2:
+            return .signed(Int64(Int32(bitPattern: try readBigEndian(UInt32.self))))
+        case 0xd3:
+            return .signed(Int64(bitPattern: try readBigEndian(UInt64.self)))
+        default:
+            offset = start
+            return nil
+        }
+    }
+
+    /// Reads a float 32/64 (or, leniently, any integer) as a `Double`, or
+    /// rewinds and returns `nil`.
+    @inline(__always)
+    mutating func readRawDouble() throws(MessagePackError) -> Double? {
+        let start = offset
+        let format = try readFormatByte()
+        switch format {
+        case 0xca:
+            return Double(Float(bitPattern: try readBigEndian(UInt32.self)))
+        case 0xcb:
+            return Double(bitPattern: try readBigEndian(UInt64.self))
+        default:
+            offset = start
+            guard let raw = try readRawInteger() else { return nil }
+            switch raw {
+            case .signed(let v): return Double(v)
+            case .unsigned(let v): return Double(v)
+            }
+        }
+    }
+
+    @inline(__always)
+    mutating func readRawBool() throws(MessagePackError) -> Bool? {
+        let start = offset
+        let format = try readFormatByte()
+        switch format {
+        case 0xc2: return false
+        case 0xc3: return true
+        default:
+            offset = start
+            return nil
+        }
+    }
+
+    @inline(__always)
+    mutating func readRawString() throws(MessagePackError) -> String? {
+        let start = offset
+        let format = try readFormatByte()
+        switch format {
+        case 0xa0...0xbf:
+            return try readString(length: Int(format & 0x1f))
+        case 0xd9:
+            return try readString(length: Int(try readBigEndian(UInt8.self)))
+        case 0xda:
+            return try readString(length: Int(try readBigEndian(UInt16.self)))
+        case 0xdb:
+            return try readString(length: Int(try readBigEndian(UInt32.self)))
+        default:
+            offset = start
+            return nil
+        }
+    }
+
+    @inline(__always)
+    mutating func readRawBinary() throws(MessagePackError) -> Data? {
+        let start = offset
+        let format = try readFormatByte()
+        switch format {
+        case 0xc4:
+            return try readData(length: Int(try readBigEndian(UInt8.self)))
+        case 0xc5:
+            return try readData(length: Int(try readBigEndian(UInt16.self)))
+        case 0xc6:
+            return try readData(length: Int(try readBigEndian(UInt32.self)))
+        default:
+            offset = start
+            return nil
+        }
+    }
+
+    @inline(__always)
+    mutating func readRawExt() throws(MessagePackError) -> (type: Int8, data: Data)? {
+        let start = offset
+        let format = try readFormatByte()
+        let length: Int
+        switch format {
+        case 0xd4: length = 1
+        case 0xd5: length = 2
+        case 0xd6: length = 4
+        case 0xd7: length = 8
+        case 0xd8: length = 16
+        case 0xc7: length = Int(try readBigEndian(UInt8.self))
+        case 0xc8: length = Int(try readBigEndian(UInt16.self))
+        case 0xc9: length = Int(try readBigEndian(UInt32.self))
+        default:
+            offset = start
+            return nil
+        }
+        let type = Int8(bitPattern: try readBigEndian(UInt8.self))
+        return (type, try readData(length: length))
+    }
+
+    /// Reads an array header and returns the element count, or rewinds and
+    /// returns `nil` if the next value is not an array.
+    @inline(__always)
+    mutating func readArrayHeader() throws(MessagePackError) -> Int? {
+        let start = offset
+        let format = try readFormatByte()
+        switch format {
+        case 0x90...0x9f:
+            return Int(format & 0x0f)
+        case 0xdc:
+            return Int(try readBigEndian(UInt16.self))
+        case 0xdd:
+            return Int(try readBigEndian(UInt32.self))
+        default:
+            offset = start
+            return nil
+        }
+    }
+
+    /// Reads a map header and returns the entry count, or rewinds and returns
+    /// `nil` if the next value is not a map.
+    @inline(__always)
+    mutating func readMapHeader() throws(MessagePackError) -> Int? {
+        let start = offset
+        let format = try readFormatByte()
+        switch format {
+        case 0x80...0x8f:
+            return Int(format & 0x0f)
+        case 0xde:
+            return Int(try readBigEndian(UInt16.self))
+        case 0xdf:
+            return Int(try readBigEndian(UInt32.self))
+        default:
+            offset = start
+            return nil
+        }
+    }
+
+    /// The next format byte without consuming it.
+    @inline(__always)
+    func peekFormat() throws(MessagePackError) -> UInt8 {
+        guard offset < count, let base else { throw MessagePackError.insufficientData }
+        return base.load(fromByteOffset: offset, as: UInt8.self)
+    }
+
+    @inline(__always)
+    mutating func skipBytes(_ n: Int) throws(MessagePackError) {
+        guard count - offset >= n else { throw MessagePackError.insufficientData }
+        offset += n
+    }
+
+    /// Advances past one complete value (including nested containers) without
+    /// materializing anything. Iterative; each loop iteration consumes at
+    /// least one input byte, so hostile counts terminate promptly.
+    mutating func skipValue() throws(MessagePackError) {
+        var remaining = 1
+        while remaining > 0 {
+            remaining -= 1
+            let format = try readFormatByte()
+            switch format {
+            case 0x00...0x7f, 0xe0...0xff, 0xc0, 0xc2, 0xc3:
+                break
+            case 0xa0...0xbf:  // fixstr
+                try skipBytes(Int(format & 0x1f))
+            case 0xc4, 0xd9:  // bin 8 / str 8
+                try skipBytes(Int(try readBigEndian(UInt8.self)))
+            case 0xc5, 0xda:  // bin 16 / str 16
+                try skipBytes(Int(try readBigEndian(UInt16.self)))
+            case 0xc6, 0xdb:  // bin 32 / str 32
+                try skipBytes(Int(try readBigEndian(UInt32.self)))
+            case 0xc7:  // ext 8
+                try skipBytes(Int(try readBigEndian(UInt8.self)) + 1)
+            case 0xc8:  // ext 16
+                try skipBytes(Int(try readBigEndian(UInt16.self)) + 1)
+            case 0xc9:  // ext 32
+                try skipBytes(Int(try readBigEndian(UInt32.self)) + 1)
+            case 0xca:  // float 32
+                try skipBytes(4)
+            case 0xcb:  // float 64
+                try skipBytes(8)
+            case 0xcc, 0xd0:  // uint 8 / int 8
+                try skipBytes(1)
+            case 0xcd, 0xd1:  // uint 16 / int 16
+                try skipBytes(2)
+            case 0xce, 0xd2:  // uint 32 / int 32
+                try skipBytes(4)
+            case 0xcf, 0xd3:  // uint 64 / int 64
+                try skipBytes(8)
+            case 0xd4:  // fixext 1
+                try skipBytes(2)
+            case 0xd5:  // fixext 2
+                try skipBytes(3)
+            case 0xd6:  // fixext 4
+                try skipBytes(5)
+            case 0xd7:  // fixext 8
+                try skipBytes(9)
+            case 0xd8:  // fixext 16
+                try skipBytes(17)
+            case 0x90...0x9f:  // fixarray
+                remaining += Int(format & 0x0f)
+            case 0xdc:  // array 16
+                remaining += Int(try readBigEndian(UInt16.self))
+            case 0xdd:  // array 32
+                remaining += Int(try readBigEndian(UInt32.self))
+            case 0x80...0x8f:  // fixmap
+                remaining += 2 * Int(format & 0x0f)
+            case 0xde:  // map 16
+                remaining += 2 * Int(try readBigEndian(UInt16.self))
+            case 0xdf:  // map 32
+                remaining += 2 * Int(try readBigEndian(UInt32.self))
+            default:  // 0xc1
+                throw MessagePackError.invalidFormat(format)
             }
         }
     }
