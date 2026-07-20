@@ -10,12 +10,10 @@ import PackageDescription
 //
 let package = Package(
     name: "ComparisonBenchmarks",
+    // Benchmarks only ever run on the host, and some of the libraries compared
+    // against declare narrower platform support than MessagePackSwift does.
     platforms: [
         .macOS(.v15),
-        .iOS(.v18),
-        .tvOS(.v18),
-        .watchOS(.v11),
-        .visionOS(.v2),
     ],
     dependencies: [
         .package(path: "../.."),
@@ -23,13 +21,19 @@ let package = Package(
         .package(url: "https://github.com/fumoboy007/msgpack-swift.git", from: "2.0.6"),
         .package(url: "https://github.com/a2/MessagePack.swift.git", from: "4.0.0"),
         .package(url: "https://github.com/nnabeyang/swift-msgpack.git", from: "1.2.1"),
+        // MPMessagePack's only dependency; unlike MPMessagePack itself it does
+        // ship a SwiftPM manifest, so it is used as-is rather than vendored.
+        .package(url: "https://github.com/gabriel/GHODictionary.git", from: "1.2.0"),
     ],
     targets: [
-        // Vendored msgpack/msgpack-objectivec (no upstream SPM support);
-        // see ThirdParty/MessagePackObjC/README.md for the patch list.
+        // Vendored gabriel/MPMessagePack (no upstream SPM support);
+        // see ThirdParty/MPMessagePack/README.md for what was left out.
         .target(
-            name: "MessagePackObjC",
-            path: "ThirdParty/MessagePackObjC",
+            name: "MPMessagePack",
+            dependencies: [
+                .product(name: "GHODictionary", package: "GHODictionary"),
+            ],
+            path: "ThirdParty/MPMessagePack",
             publicHeadersPath: "include"
         ),
         .executableTarget(
@@ -37,7 +41,7 @@ let package = Package(
             dependencies: [
                 .product(name: "Benchmark", package: "package-benchmark"),
                 .product(name: "MessagePackSwift", package: "MessagePackSwift"),
-                "MessagePackObjC",
+                "MPMessagePack",
                 .product(name: "DMMessagePack", package: "msgpack-swift"),
                 .product(
                     name: "MessagePack",

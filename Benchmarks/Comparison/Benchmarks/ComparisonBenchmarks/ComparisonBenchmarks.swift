@@ -2,14 +2,15 @@ import A2MessagePack
 import Benchmark
 import Foundation
 import MessagePack  // fumoboy007/msgpack-swift (product DMMessagePack)
-import MessagePackObjC  // vendored msgpack/msgpack-objectivec
+import MPMessagePack  // vendored gabriel/MPMessagePack
 import MessagePackSwift
 import SwiftMsgpack  // nnabeyang/swift-msgpack
 
 // Cross-library comparison on shared logical fixtures. Every library encodes
 // its own natural representation of the same data, and decodes bytes it
-// produced itself (the ObjC library speaks the pre-2013 spec, so feeding it
-// another library's output would not parse).
+// produced itself — libraries differ in which formats they emit for a given
+// value, and decoding a foreign payload would measure those choices rather
+// than the library under test.
 
 // MARK: - Codable fixtures (MessagePackSwift / DMMessagePack / SwiftMsgpack)
 
@@ -99,9 +100,9 @@ private let a2StringTree = A2MessagePack.MessagePackValue.array(
     stringValues.map { .string($0) }
 )
 
-// MARK: - Foundation-object fixtures (MessagePackObjC)
+// MARK: - Foundation-object fixtures (MPMessagePack)
 
-private let objcPeople: NSArray = people.map { person -> NSDictionary in
+private let mpPeople: NSArray = people.map { person -> NSDictionary in
     [
         "id": person.id,
         "name": person.name,
@@ -112,8 +113,8 @@ private let objcPeople: NSArray = people.map { person -> NSDictionary in
     ] as NSDictionary
 } as NSArray
 
-private let objcInts = intValues as NSArray
-private let objcStrings = stringValues as NSArray
+private let mpInts = intValues as NSArray
+private let mpStrings = stringValues as NSArray
 
 // MARK: - Pre-encoded payloads for the decode benchmarks (own format each)
 
@@ -137,18 +138,18 @@ private let a2PeopleData = A2MessagePack.pack(a2PeopleTree)
 private let a2IntData = A2MessagePack.pack(a2IntTree)
 private let a2StringData = A2MessagePack.pack(a2StringTree)
 
-private let objcPeopleData = MessagePackPacker.pack(objcPeople)!
-private let objcIntData = MessagePackPacker.pack(objcInts)!
-private let objcStringData = MessagePackPacker.pack(objcStrings)!
+private let mpPeopleData = try! MPMessagePackWriter.write(mpPeople) as Data
+private let mpIntData = try! MPMessagePackWriter.write(mpInts) as Data
+private let mpStringData = try! MPMessagePackWriter.write(mpStrings) as Data
 
 // MARK: - Benchmarks
 
 let benchmarks: @Sendable () -> Void = {
-    // The ObjC parser returns nil on failure instead of throwing, and a silent
-    // nil would make its decode benchmarks measure nothing.
-    precondition((MessagePackParser.parseData(objcPeopleData) as? [Any])?.count == 1_000)
-    precondition((MessagePackParser.parseData(objcIntData) as? [Any])?.count == 10_000)
-    precondition((MessagePackParser.parseData(objcStringData) as? [Any])?.count == 1_000)
+    // Sanity-check the Foundation-object route so its decode benchmarks cannot
+    // silently measure a short-circuited parse.
+    precondition((try! MPMessagePackReader.read(mpPeopleData) as? [Any])?.count == 1_000)
+    precondition((try! MPMessagePackReader.read(mpIntData) as? [Any])?.count == 10_000)
+    precondition((try! MPMessagePackReader.read(mpStringData) as? [Any])?.count == 1_000)
 
     Benchmark.defaultConfiguration = .init(
         metrics: [.cpuTotal, .wallClock, .mallocCountTotal, .throughput],
@@ -196,9 +197,9 @@ let benchmarks: @Sendable () -> Void = {
         }
     }
 
-    Benchmark("structs encode: msgpack-objectivec (Foundation)") { benchmark in
+    Benchmark("structs encode: gabriel/MPMessagePack (Foundation)") { benchmark in
         for _ in benchmark.scaledIterations {
-            blackHole(MessagePackPacker.pack(objcPeople))
+            blackHole(try MPMessagePackWriter.write(mpPeople))
         }
     }
 
@@ -241,9 +242,9 @@ let benchmarks: @Sendable () -> Void = {
         }
     }
 
-    Benchmark("structs decode: msgpack-objectivec (Foundation)") { benchmark in
+    Benchmark("structs decode: gabriel/MPMessagePack (Foundation)") { benchmark in
         for _ in benchmark.scaledIterations {
-            blackHole(MessagePackParser.parseData(objcPeopleData))
+            blackHole(try MPMessagePackReader.read(mpPeopleData))
         }
     }
 
@@ -288,9 +289,9 @@ let benchmarks: @Sendable () -> Void = {
         }
     }
 
-    Benchmark("int array encode: msgpack-objectivec (Foundation)") { benchmark in
+    Benchmark("int array encode: gabriel/MPMessagePack (Foundation)") { benchmark in
         for _ in benchmark.scaledIterations {
-            blackHole(MessagePackPacker.pack(objcInts))
+            blackHole(try MPMessagePackWriter.write(mpInts))
         }
     }
 
@@ -333,9 +334,9 @@ let benchmarks: @Sendable () -> Void = {
         }
     }
 
-    Benchmark("int array decode: msgpack-objectivec (Foundation)") { benchmark in
+    Benchmark("int array decode: gabriel/MPMessagePack (Foundation)") { benchmark in
         for _ in benchmark.scaledIterations {
-            blackHole(MessagePackParser.parseData(objcIntData))
+            blackHole(try MPMessagePackReader.read(mpIntData))
         }
     }
 
@@ -380,9 +381,9 @@ let benchmarks: @Sendable () -> Void = {
         }
     }
 
-    Benchmark("string array encode: msgpack-objectivec (Foundation)") { benchmark in
+    Benchmark("string array encode: gabriel/MPMessagePack (Foundation)") { benchmark in
         for _ in benchmark.scaledIterations {
-            blackHole(MessagePackPacker.pack(objcStrings))
+            blackHole(try MPMessagePackWriter.write(mpStrings))
         }
     }
 
@@ -425,9 +426,9 @@ let benchmarks: @Sendable () -> Void = {
         }
     }
 
-    Benchmark("string array decode: msgpack-objectivec (Foundation)") { benchmark in
+    Benchmark("string array decode: gabriel/MPMessagePack (Foundation)") { benchmark in
         for _ in benchmark.scaledIterations {
-            blackHole(MessagePackParser.parseData(objcStringData))
+            blackHole(try MPMessagePackReader.read(mpStringData))
         }
     }
 }

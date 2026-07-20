@@ -213,9 +213,9 @@ Deserialization of a flat scalar array performs 1 allocation (the result array);
 [fumoboy007/msgpack-swift](https://github.com/fumoboy007/msgpack-swift),
 [a2/MessagePack.swift](https://github.com/a2/MessagePack.swift),
 [nnabeyang/swift-msgpack](https://github.com/nnabeyang/swift-msgpack), and
-[msgpack/msgpack-objectivec](https://github.com/msgpack/msgpack-objectivec)
-(vendored under `Benchmarks/Comparison/ThirdParty` with minimal SPM/ARC patches
-— it has no upstream SwiftPM support).
+[gabriel/MPMessagePack](https://github.com/gabriel/MPMessagePack) (vendored
+unmodified under `Benchmarks/Comparison/ThirdParty` — it ships a podspec but no
+SwiftPM manifest).
 
 It is a **separate package** that depends on this one by path, so the libraries
 it compares against never enter the dependency graph of MessagePackSwift's own
@@ -225,23 +225,23 @@ consumers:
 swift package --package-path Benchmarks/Comparison benchmark run
 ```
 
-Every library encodes its own natural representation of the same logical
-fixtures and decodes bytes it produced itself (the ObjC library speaks the
-pre-2013 spec, so payloads are not interchangeable with it). Codable-based
-routes decode into typed structs; the "value tree" routes produce a
-MessagePack value enum; the ObjC route produces Foundation
-`NSArray`/`NSDictionary` objects. Same machine and metric as above,
-p50 wall clock:
+Each library encodes its own natural representation of the same logical
+fixtures and decodes bytes it produced itself — libraries differ in which
+formats they emit for a given value, so decoding a foreign payload would
+measure those choices rather than the library under test. Codable-based routes
+decode into typed structs; the "value tree" routes produce a MessagePack value
+enum; MPMessagePack produces Foundation `NSArray`/`NSDictionary` objects. Same
+machine and metric as above, p50 wall clock:
 
 | Library (route) | structs (1k) encode / decode | int array (10k) encode / decode | string array (1k) encode / decode |
 |---|---|---|---|
-| **MessagePackSwift (macro)** | **43 µs / 228 µs** | 28 µs / **23 µs** | **12 µs / 50 µs** |
-| MessagePackSwift (Codable) | 459 µs / 833 µs | **27 µs** / 26 µs | 16 µs / 50 µs |
-| MessagePackSwift (value tree) | 464 µs / 817 µs | 55 µs / 46 µs | 19 µs / 52 µs |
-| fumoboy007/msgpack-swift (Codable) | 1.11 ms / 1.88 ms | 64 µs / 243 µs | 13 µs / 81 µs |
-| a2/MessagePack.swift (value tree) | 2.07 ms / 1.67 ms | 976 µs / 276 µs | 160 µs / 164 µs |
-| nnabeyang/swift-msgpack (Codable) | 5.70 ms / 4.42 ms | 5.22 ms / 4.34 ms | 615 µs / 552 µs |
-| msgpack-objectivec (Foundation) | 1.11 ms / 1.02 ms | 486 µs / 299 µs | 51 µs / 122 µs |
+| **MessagePackSwift (macro)** | **43 µs / 227 µs** | 28 µs / **23 µs** | **11 µs / 50 µs** |
+| MessagePackSwift (Codable) | 462 µs / 829 µs | **27 µs** / 25 µs | 16 µs / 50 µs |
+| MessagePackSwift (value tree) | 474 µs / 820 µs | 55 µs / 48 µs | 19 µs / 52 µs |
+| fumoboy007/msgpack-swift (Codable) | 1.12 ms / 1.93 ms | 68 µs / 239 µs | 13 µs / 81 µs |
+| a2/MessagePack.swift (value tree) | 2.07 ms / 1.69 ms | 1.04 ms / 288 µs | 160 µs / 167 µs |
+| gabriel/MPMessagePack (Foundation) | 1.53 ms / 2.68 ms | 1.08 ms / 781 µs | 81 µs / 316 µs |
+| nnabeyang/swift-msgpack (Codable) | 5.88 ms / 4.50 ms | 5.31 ms / 4.31 ms | 622 µs / 564 µs |
 
 ## Testing
 

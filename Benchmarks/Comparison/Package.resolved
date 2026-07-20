@@ -1,6 +1,15 @@
 {
-  "originHash" : "8fc3fea3e206d0cad70c0f3b689edcf7cdeb53189f5512a140fae834e69fdde9",
+  "originHash" : "f366b87dca5063afc546a7653610e85acf36493489ec8a3b387afe36eb48498d",
   "pins" : [
+    {
+      "identity" : "ghodictionary",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/gabriel/GHODictionary.git",
+      "state" : {
+        "revision" : "a67b9df6dfc6e6af3910d104fd9900e15dc15de9",
+        "version" : "1.2.0"
+      }
+    },
     {
       "identity" : "hdrhistogram-swift",
       "kind" : "remoteSourceControl",
