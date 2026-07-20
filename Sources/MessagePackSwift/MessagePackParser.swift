@@ -341,6 +341,20 @@ extension MessagePackSerializer.Parser {
         }
     }
 
+    /// Consumes a nil marker if the next value is nil, and returns whether it
+    /// did. Unlike the other `readRaw` methods this reports presence rather
+    /// than a payload, so it needs no rewind: nothing is consumed unless the
+    /// marker matched.
+    @inlinable
+    @inline(__always)
+    mutating func readRawNil() -> Bool {
+        guard offset < count, let base,
+            base.load(fromByteOffset: offset, as: UInt8.self) == 0xc0
+        else { return false }
+        offset += 1
+        return true
+    }
+
     @inlinable
     @inline(__always)
     mutating func readRawBool() throws(MessagePackError) -> Bool? {
@@ -451,7 +465,7 @@ extension MessagePackSerializer.Parser {
     /// returns `nil` if the next value is not an array.
     @inlinable
     @inline(__always)
-    mutating func readArrayHeader() throws(MessagePackError) -> Int? {
+    mutating func readRawArrayHeader() throws(MessagePackError) -> Int? {
         let start = offset
         let format = try readFormatByte()
         switch format {
@@ -471,7 +485,7 @@ extension MessagePackSerializer.Parser {
     /// `nil` if the next value is not a map.
     @inlinable
     @inline(__always)
-    mutating func readMapHeader() throws(MessagePackError) -> Int? {
+    mutating func readRawMapHeader() throws(MessagePackError) -> Int? {
         let start = offset
         let format = try readFormatByte()
         switch format {

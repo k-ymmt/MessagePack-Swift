@@ -50,13 +50,7 @@ public struct MessagePackReader: ~Copyable {
     /// did. Used to decode optionals.
     @inlinable
     public mutating func readNilIfPresent() -> Bool {
-        if parser.offset < parser.count, let base = parser.base,
-            base.load(fromByteOffset: parser.offset, as: UInt8.self) == 0xc0
-        {
-            parser.offset += 1
-            return true
-        }
-        return false
+        parser.readRawNil()
     }
 
     @inlinable
@@ -205,7 +199,7 @@ public struct MessagePackReader: ~Copyable {
     /// for. Call ``endContainer()`` after reading the elements.
     @inlinable
     public mutating func readArrayHeader() throws(MessagePackError) -> Int {
-        guard let count = try parser.readArrayHeader() else {
+        guard let count = try parser.readRawArrayHeader() else {
             throw MessagePackError.typeMismatch(expected: "array", format: try parser.peekFormat())
         }
         guard count <= parser.count - parser.offset else {
@@ -221,7 +215,7 @@ public struct MessagePackReader: ~Copyable {
     /// ``endContainer()`` after reading the entries.
     @inlinable
     public mutating func readMapHeader() throws(MessagePackError) -> Int {
-        guard let count = try parser.readMapHeader() else {
+        guard let count = try parser.readRawMapHeader() else {
             throw MessagePackError.typeMismatch(expected: "map", format: try parser.peekFormat())
         }
         guard count <= (parser.count - parser.offset) / 2 else {

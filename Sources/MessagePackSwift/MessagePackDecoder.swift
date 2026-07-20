@@ -166,7 +166,7 @@ enum MessagePackDecoding {
     }
 
     @inline(__always)
-    static func integer<T: FixedWidthInteger>(
+    static func readInteger<T: FixedWidthInteger>(
         _ parser: inout Parser
     ) throws(MessagePackDecodeFailure) -> T {
         let raw: MessagePackRawInteger?
@@ -192,7 +192,7 @@ enum MessagePackDecoding {
     }
 
     @inline(__always)
-    static func bool(_ parser: inout Parser) throws(MessagePackDecodeFailure) -> Bool {
+    static func readBool(_ parser: inout Parser) throws(MessagePackDecodeFailure) -> Bool {
         let value: Bool?
         do throws(MessagePackError) {
             value = try parser.readRawBool()
@@ -204,7 +204,7 @@ enum MessagePackDecoding {
     }
 
     @inline(__always)
-    static func string(_ parser: inout Parser) throws(MessagePackDecodeFailure) -> String {
+    static func readString(_ parser: inout Parser) throws(MessagePackDecodeFailure) -> String {
         let value: String?
         do throws(MessagePackError) {
             value = try parser.readRawString()
@@ -216,7 +216,7 @@ enum MessagePackDecoding {
     }
 
     @inline(__always)
-    static func double(_ parser: inout Parser) throws(MessagePackDecodeFailure) -> Double {
+    static func readDouble(_ parser: inout Parser) throws(MessagePackDecodeFailure) -> Double {
         let value: Double?
         do throws(MessagePackError) {
             value = try parser.readRawDouble()
@@ -228,8 +228,8 @@ enum MessagePackDecoding {
     }
 
     @inline(__always)
-    static func float(_ parser: inout Parser) throws(MessagePackDecodeFailure) -> Float {
-        let value = try double(&parser)
+    static func readFloat(_ parser: inout Parser) throws(MessagePackDecodeFailure) -> Float {
+        let value = try readDouble(&parser)
         let narrowed = Float(value)
         // A finite float64 must stay finite as Float; JSONDecoder likewise
         // rejects numbers that do not fit the requested type.
@@ -240,7 +240,7 @@ enum MessagePackDecoding {
     }
 
     @inline(__always)
-    static func binary(_ parser: inout Parser) throws(MessagePackDecodeFailure) -> Data {
+    static func readBinary(_ parser: inout Parser) throws(MessagePackDecodeFailure) -> Data {
         let value: Data?
         do throws(MessagePackError) {
             value = try parser.readRawBinary()
@@ -251,7 +251,7 @@ enum MessagePackDecoding {
         return value
     }
 
-    static func timestamp(
+    static func readTimestamp(
         _ parser: inout Parser
     ) throws(MessagePackDecodeFailure) -> MessagePackTimestamp {
         let ext: (type: Int8, data: Data)?
@@ -269,12 +269,12 @@ enum MessagePackDecoding {
         return timestamp
     }
 
-    static func date(_ parser: inout Parser) throws(MessagePackDecodeFailure) -> Date {
+    static func readDate(_ parser: inout Parser) throws(MessagePackDecodeFailure) -> Date {
         if let format = try? parser.peekFormat(), isExtFormat(format) {
-            return try timestamp(&parser).date
+            return try readTimestamp(&parser).date
         }
         // Leniently accept a numeric value as seconds since 1970.
-        return Date(timeIntervalSince1970: try double(&parser))
+        return Date(timeIntervalSince1970: try readDouble(&parser))
     }
 
     @inline(__always)
@@ -286,7 +286,7 @@ enum MessagePackDecoding {
     /// coding path on failure. The path closure only runs when an error
     /// actually propagates, keeping the happy path allocation-free.
     @inline(__always)
-    private static func scalar<V>(
+    private static func readScalarOrRewind<V>(
         _ type: V.Type,
         _ parser: inout Parser,
         _ startOffset: Int,
@@ -313,7 +313,7 @@ enum MessagePackDecoding {
         let startOffset = parser.offset
         let headerCount: Int?
         do throws(MessagePackError) {
-            headerCount = try parser.readArrayHeader()
+            headerCount = try parser.readRawArrayHeader()
         } catch {
             throw corrupted(error, codingPath())
         }
@@ -357,39 +357,39 @@ enum MessagePackDecoding {
         // that catch and retry (or an unkeyed container's cursor) never
         // desync from the element boundary.
         let startOffset = parser.offset
-        if T.self == Int.self { return try scalar(Int.self, &parser, startOffset, codingPath, integer) as! T }
-        if T.self == String.self { return try scalar(String.self, &parser, startOffset, codingPath, string) as! T }
-        if T.self == Bool.self { return try scalar(Bool.self, &parser, startOffset, codingPath, bool) as! T }
-        if T.self == Double.self { return try scalar(Double.self, &parser, startOffset, codingPath, double) as! T }
-        if T.self == Float.self { return try scalar(Float.self, &parser, startOffset, codingPath, float) as! T }
-        if T.self == Int64.self { return try scalar(Int64.self, &parser, startOffset, codingPath, integer) as! T }
-        if T.self == UInt64.self { return try scalar(UInt64.self, &parser, startOffset, codingPath, integer) as! T }
-        if T.self == Int32.self { return try scalar(Int32.self, &parser, startOffset, codingPath, integer) as! T }
-        if T.self == UInt32.self { return try scalar(UInt32.self, &parser, startOffset, codingPath, integer) as! T }
-        if T.self == Int16.self { return try scalar(Int16.self, &parser, startOffset, codingPath, integer) as! T }
-        if T.self == UInt16.self { return try scalar(UInt16.self, &parser, startOffset, codingPath, integer) as! T }
-        if T.self == Int8.self { return try scalar(Int8.self, &parser, startOffset, codingPath, integer) as! T }
-        if T.self == UInt8.self { return try scalar(UInt8.self, &parser, startOffset, codingPath, integer) as! T }
-        if T.self == UInt.self { return try scalar(UInt.self, &parser, startOffset, codingPath, integer) as! T }
-        if T.self == Date.self { return try scalar(Date.self, &parser, startOffset, codingPath, date) as! T }
-        if T.self == Data.self { return try scalar(Data.self, &parser, startOffset, codingPath, binary) as! T }
+        if T.self == Int.self { return try readScalarOrRewind(Int.self, &parser, startOffset, codingPath, readInteger) as! T }
+        if T.self == String.self { return try readScalarOrRewind(String.self, &parser, startOffset, codingPath, readString) as! T }
+        if T.self == Bool.self { return try readScalarOrRewind(Bool.self, &parser, startOffset, codingPath, readBool) as! T }
+        if T.self == Double.self { return try readScalarOrRewind(Double.self, &parser, startOffset, codingPath, readDouble) as! T }
+        if T.self == Float.self { return try readScalarOrRewind(Float.self, &parser, startOffset, codingPath, readFloat) as! T }
+        if T.self == Int64.self { return try readScalarOrRewind(Int64.self, &parser, startOffset, codingPath, readInteger) as! T }
+        if T.self == UInt64.self { return try readScalarOrRewind(UInt64.self, &parser, startOffset, codingPath, readInteger) as! T }
+        if T.self == Int32.self { return try readScalarOrRewind(Int32.self, &parser, startOffset, codingPath, readInteger) as! T }
+        if T.self == UInt32.self { return try readScalarOrRewind(UInt32.self, &parser, startOffset, codingPath, readInteger) as! T }
+        if T.self == Int16.self { return try readScalarOrRewind(Int16.self, &parser, startOffset, codingPath, readInteger) as! T }
+        if T.self == UInt16.self { return try readScalarOrRewind(UInt16.self, &parser, startOffset, codingPath, readInteger) as! T }
+        if T.self == Int8.self { return try readScalarOrRewind(Int8.self, &parser, startOffset, codingPath, readInteger) as! T }
+        if T.self == UInt8.self { return try readScalarOrRewind(UInt8.self, &parser, startOffset, codingPath, readInteger) as! T }
+        if T.self == UInt.self { return try readScalarOrRewind(UInt.self, &parser, startOffset, codingPath, readInteger) as! T }
+        if T.self == Date.self { return try readScalarOrRewind(Date.self, &parser, startOffset, codingPath, readDate) as! T }
+        if T.self == Data.self { return try readScalarOrRewind(Data.self, &parser, startOffset, codingPath, readBinary) as! T }
         if T.self == MessagePackTimestamp.self {
-            return try scalar(MessagePackTimestamp.self, &parser, startOffset, codingPath, timestamp) as! T
+            return try readScalarOrRewind(MessagePackTimestamp.self, &parser, startOffset, codingPath, readTimestamp) as! T
         }
-        if T.self == [Int].self { return try primitiveArray(&parser, codingPath, integer) as [Int] as! T }
-        if T.self == [String].self { return try primitiveArray(&parser, codingPath, string) as! T }
-        if T.self == [Double].self { return try primitiveArray(&parser, codingPath, double) as! T }
-        if T.self == [Bool].self { return try primitiveArray(&parser, codingPath, bool) as! T }
-        if T.self == [Float].self { return try primitiveArray(&parser, codingPath, float) as! T }
-        if T.self == [Int64].self { return try primitiveArray(&parser, codingPath, integer) as [Int64] as! T }
-        if T.self == [UInt64].self { return try primitiveArray(&parser, codingPath, integer) as [UInt64] as! T }
-        if T.self == [Int32].self { return try primitiveArray(&parser, codingPath, integer) as [Int32] as! T }
-        if T.self == [UInt32].self { return try primitiveArray(&parser, codingPath, integer) as [UInt32] as! T }
-        if T.self == [Int16].self { return try primitiveArray(&parser, codingPath, integer) as [Int16] as! T }
-        if T.self == [UInt16].self { return try primitiveArray(&parser, codingPath, integer) as [UInt16] as! T }
-        if T.self == [Int8].self { return try primitiveArray(&parser, codingPath, integer) as [Int8] as! T }
-        if T.self == [UInt8].self { return try primitiveArray(&parser, codingPath, integer) as [UInt8] as! T }
-        if T.self == [UInt].self { return try primitiveArray(&parser, codingPath, integer) as [UInt] as! T }
+        if T.self == [Int].self { return try primitiveArray(&parser, codingPath, readInteger) as [Int] as! T }
+        if T.self == [String].self { return try primitiveArray(&parser, codingPath, readString) as! T }
+        if T.self == [Double].self { return try primitiveArray(&parser, codingPath, readDouble) as! T }
+        if T.self == [Bool].self { return try primitiveArray(&parser, codingPath, readBool) as! T }
+        if T.self == [Float].self { return try primitiveArray(&parser, codingPath, readFloat) as! T }
+        if T.self == [Int64].self { return try primitiveArray(&parser, codingPath, readInteger) as [Int64] as! T }
+        if T.self == [UInt64].self { return try primitiveArray(&parser, codingPath, readInteger) as [UInt64] as! T }
+        if T.self == [Int32].self { return try primitiveArray(&parser, codingPath, readInteger) as [Int32] as! T }
+        if T.self == [UInt32].self { return try primitiveArray(&parser, codingPath, readInteger) as [UInt32] as! T }
+        if T.self == [Int16].self { return try primitiveArray(&parser, codingPath, readInteger) as [Int16] as! T }
+        if T.self == [UInt16].self { return try primitiveArray(&parser, codingPath, readInteger) as [UInt16] as! T }
+        if T.self == [Int8].self { return try primitiveArray(&parser, codingPath, readInteger) as [Int8] as! T }
+        if T.self == [UInt8].self { return try primitiveArray(&parser, codingPath, readInteger) as [UInt8] as! T }
+        if T.self == [UInt].self { return try primitiveArray(&parser, codingPath, readInteger) as [UInt] as! T }
         let path = codingPath()
         let impl = MessagePackDecoderImpl(
             context: context, offset: startOffset, codingPath: path)
@@ -431,7 +431,7 @@ struct MessagePackDecoderImpl: Decoder, SingleValueDecodingContainer {
         var parser = context.parser(at: offset)
         let entryCount: Int?
         do throws(MessagePackError) {
-            entryCount = try parser.readMapHeader()
+            entryCount = try parser.readRawMapHeader()
         } catch {
             throw MessagePackDecoding.corrupted(error, codingPath)
         }
@@ -463,7 +463,7 @@ struct MessagePackDecoderImpl: Decoder, SingleValueDecodingContainer {
         var parser = context.parser(at: offset)
         let elementCount: Int?
         do throws(MessagePackError) {
-            elementCount = try parser.readArrayHeader()
+            elementCount = try parser.readRawArrayHeader()
         } catch {
             throw MessagePackDecoding.corrupted(error, codingPath)
         }
@@ -503,31 +503,31 @@ struct MessagePackDecoderImpl: Decoder, SingleValueDecodingContainer {
     }
 
     func decode(_ type: Bool.Type) throws -> Bool {
-        try decodeScalar(type, MessagePackDecoding.bool)
+        try decodeScalar(type, MessagePackDecoding.readBool)
     }
 
     func decode(_ type: String.Type) throws -> String {
-        try decodeScalar(type, MessagePackDecoding.string)
+        try decodeScalar(type, MessagePackDecoding.readString)
     }
 
     func decode(_ type: Double.Type) throws -> Double {
-        try decodeScalar(type, MessagePackDecoding.double)
+        try decodeScalar(type, MessagePackDecoding.readDouble)
     }
 
     func decode(_ type: Float.Type) throws -> Float {
-        try decodeScalar(type, MessagePackDecoding.float)
+        try decodeScalar(type, MessagePackDecoding.readFloat)
     }
 
-    func decode(_ type: Int.Type) throws -> Int { try decodeScalar(type, MessagePackDecoding.integer) }
-    func decode(_ type: Int8.Type) throws -> Int8 { try decodeScalar(type, MessagePackDecoding.integer) }
-    func decode(_ type: Int16.Type) throws -> Int16 { try decodeScalar(type, MessagePackDecoding.integer) }
-    func decode(_ type: Int32.Type) throws -> Int32 { try decodeScalar(type, MessagePackDecoding.integer) }
-    func decode(_ type: Int64.Type) throws -> Int64 { try decodeScalar(type, MessagePackDecoding.integer) }
-    func decode(_ type: UInt.Type) throws -> UInt { try decodeScalar(type, MessagePackDecoding.integer) }
-    func decode(_ type: UInt8.Type) throws -> UInt8 { try decodeScalar(type, MessagePackDecoding.integer) }
-    func decode(_ type: UInt16.Type) throws -> UInt16 { try decodeScalar(type, MessagePackDecoding.integer) }
-    func decode(_ type: UInt32.Type) throws -> UInt32 { try decodeScalar(type, MessagePackDecoding.integer) }
-    func decode(_ type: UInt64.Type) throws -> UInt64 { try decodeScalar(type, MessagePackDecoding.integer) }
+    func decode(_ type: Int.Type) throws -> Int { try decodeScalar(type, MessagePackDecoding.readInteger) }
+    func decode(_ type: Int8.Type) throws -> Int8 { try decodeScalar(type, MessagePackDecoding.readInteger) }
+    func decode(_ type: Int16.Type) throws -> Int16 { try decodeScalar(type, MessagePackDecoding.readInteger) }
+    func decode(_ type: Int32.Type) throws -> Int32 { try decodeScalar(type, MessagePackDecoding.readInteger) }
+    func decode(_ type: Int64.Type) throws -> Int64 { try decodeScalar(type, MessagePackDecoding.readInteger) }
+    func decode(_ type: UInt.Type) throws -> UInt { try decodeScalar(type, MessagePackDecoding.readInteger) }
+    func decode(_ type: UInt8.Type) throws -> UInt8 { try decodeScalar(type, MessagePackDecoding.readInteger) }
+    func decode(_ type: UInt16.Type) throws -> UInt16 { try decodeScalar(type, MessagePackDecoding.readInteger) }
+    func decode(_ type: UInt32.Type) throws -> UInt32 { try decodeScalar(type, MessagePackDecoding.readInteger) }
+    func decode(_ type: UInt64.Type) throws -> UInt64 { try decodeScalar(type, MessagePackDecoding.readInteger) }
 
     func decode<T: Decodable>(_ type: T.Type) throws -> T {
         var parser = context.parser(at: offset)
@@ -536,475 +536,3 @@ struct MessagePackDecoderImpl: Decoder, SingleValueDecodingContainer {
     }
 }
 
-// MARK: - Keyed container
-
-/// Entry offsets for one wire map, scanned once at container creation.
-/// A class so the rolling search index survives the container being copied
-/// into `KeyedDecodingContainer`'s box.
-final class MessagePackKeyedStorage {
-    struct Entry {
-        let keyOffset: Int
-        let valueOffset: Int
-    }
-
-    let entries: [Entry]
-    /// Where the next key lookup starts. Keys are usually requested in wire
-    /// order, so remembering the last match makes typical lookups O(1).
-    var searchIndex = 0
-
-    init(entryCount: Int, parser: inout MessagePackSerializer.Parser) throws(MessagePackError) {
-        var entries: [Entry] = []
-        entries.reserveCapacity(entryCount)
-        for _ in 0..<entryCount {
-            let keyOffset = parser.offset
-            try parser.skipValue()
-            let valueOffset = parser.offset
-            try parser.skipValue()
-            entries.append(Entry(keyOffset: keyOffset, valueOffset: valueOffset))
-        }
-        self.entries = entries
-    }
-}
-
-struct MessagePackKeyedDecodingContainer<Key: CodingKey>: KeyedDecodingContainerProtocol {
-    let context: MessagePackDecodingContext
-    let storage: MessagePackKeyedStorage
-    let codingPath: [CodingKey]
-
-    var allKeys: [Key] {
-        var keys: [Key] = []
-        keys.reserveCapacity(storage.entries.count)
-        for entry in storage.entries {
-            var parser = context.parser(at: entry.keyOffset)
-            if let string = ((try? parser.readRawString()) ?? nil) {
-                if let key = Key(stringValue: string) { keys.append(key) }
-            } else {
-                var intParser = context.parser(at: entry.keyOffset)
-                guard let raw = ((try? intParser.readRawInteger()) ?? nil) else { continue }
-                let intValue: Int?
-                switch raw {
-                case .signed(let v): intValue = Int(exactly: v)
-                case .unsigned(let v): intValue = Int(exactly: v)
-                }
-                if let intValue, let key = Key(intValue: intValue) { keys.append(key) }
-            }
-        }
-        return keys
-    }
-
-    /// Finds the value offset for a key by comparing raw key bytes in place;
-    /// no `String` is materialized for wire keys.
-    private func valueOffset(stringValue: String, intValue: Int?) -> Int? {
-        let entries = storage.entries
-        let entryCount = entries.count
-        guard entryCount > 0 else { return nil }
-        var keyString = stringValue
-        return keyString.withUTF8 { (keyBytes: UnsafeBufferPointer<UInt8>) -> Int? in
-            var index = storage.searchIndex
-            for _ in 0..<entryCount {
-                if index >= entryCount { index = 0 }
-                let entry = entries[index]
-                index += 1
-                if matches(keyBytes: keyBytes, intValue: intValue, at: entry.keyOffset) {
-                    // Remember the match itself (not the next entry): the
-                    // default decodeIfPresent looks the same key up three
-                    // times (contains → decodeNil → decode), and this keeps
-                    // repeats O(1) while sequential access stays O(1).
-                    storage.searchIndex = index - 1
-                    return entry.valueOffset
-                }
-            }
-            return nil
-        }
-    }
-
-    private func matches(
-        keyBytes: UnsafeBufferPointer<UInt8>, intValue: Int?, at keyOffset: Int
-    ) -> Bool {
-        var parser = context.parser(at: keyOffset)
-        guard let format = try? parser.readFormatByte() else { return false }
-        let length: Int
-        switch format {
-        case 0xa0...0xbf:
-            length = Int(format & 0x1f)
-        case 0xd9:
-            guard let l = try? parser.readBigEndian(UInt8.self) else { return false }
-            length = Int(l)
-        case 0xda:
-            guard let l = try? parser.readBigEndian(UInt16.self) else { return false }
-            length = Int(l)
-        case 0xdb:
-            guard let l = try? parser.readBigEndian(UInt32.self) else { return false }
-            length = Int(l)
-        default:
-            // Non-string wire key: match against the coding key's intValue.
-            guard let intValue else { return false }
-            var intParser = context.parser(at: keyOffset)
-            guard let raw = ((try? intParser.readRawInteger()) ?? nil) else { return false }
-            switch raw {
-            case .signed(let v): return Int64(intValue) == v
-            case .unsigned(let v): return intValue >= 0 && UInt64(intValue) == v
-            }
-        }
-        guard length == keyBytes.count else { return false }
-        if length == 0 { return true }
-        guard parser.count - parser.offset >= length,
-            let base = parser.base,
-            let keyBase = keyBytes.baseAddress
-        else { return false }
-        return memcmp(base + parser.offset, keyBase, length) == 0
-    }
-
-    private func requireOffset(_ key: Key) throws -> Int {
-        guard let offset = valueOffset(stringValue: key.stringValue, intValue: key.intValue) else {
-            throw DecodingError.keyNotFound(
-                key,
-                DecodingError.Context(
-                    codingPath: codingPath,
-                    debugDescription: "No value associated with key \"\(key.stringValue)\""
-                ))
-        }
-        return offset
-    }
-
-    func contains(_ key: Key) -> Bool {
-        valueOffset(stringValue: key.stringValue, intValue: key.intValue) != nil
-    }
-
-    func decodeNil(forKey key: Key) throws -> Bool {
-        let parser = context.parser(at: try requireOffset(key))
-        return ((try? parser.peekFormat()) ?? 0xc1) == 0xc0
-    }
-
-    private func decodeScalar<T>(
-        _ type: T.Type, forKey key: Key,
-        _ read: (inout MessagePackDecoding.Parser) throws(MessagePackDecodeFailure) -> T
-    ) throws -> T {
-        var parser = context.parser(at: try requireOffset(key))
-        do throws(MessagePackDecodeFailure) {
-            return try read(&parser)
-        } catch {
-            throw MessagePackDecoding.decodingError(
-                error, type: type, parser: parser, path: codingPath + [key])
-        }
-    }
-
-    func decode(_ type: Bool.Type, forKey key: Key) throws -> Bool {
-        try decodeScalar(type, forKey: key, MessagePackDecoding.bool)
-    }
-
-    func decode(_ type: String.Type, forKey key: Key) throws -> String {
-        try decodeScalar(type, forKey: key, MessagePackDecoding.string)
-    }
-
-    func decode(_ type: Double.Type, forKey key: Key) throws -> Double {
-        try decodeScalar(type, forKey: key, MessagePackDecoding.double)
-    }
-
-    func decode(_ type: Float.Type, forKey key: Key) throws -> Float {
-        try decodeScalar(type, forKey: key, MessagePackDecoding.float)
-    }
-
-    func decode(_ type: Int.Type, forKey key: Key) throws -> Int {
-        try decodeScalar(type, forKey: key, MessagePackDecoding.integer)
-    }
-
-    func decode(_ type: Int8.Type, forKey key: Key) throws -> Int8 {
-        try decodeScalar(type, forKey: key, MessagePackDecoding.integer)
-    }
-
-    func decode(_ type: Int16.Type, forKey key: Key) throws -> Int16 {
-        try decodeScalar(type, forKey: key, MessagePackDecoding.integer)
-    }
-
-    func decode(_ type: Int32.Type, forKey key: Key) throws -> Int32 {
-        try decodeScalar(type, forKey: key, MessagePackDecoding.integer)
-    }
-
-    func decode(_ type: Int64.Type, forKey key: Key) throws -> Int64 {
-        try decodeScalar(type, forKey: key, MessagePackDecoding.integer)
-    }
-
-    func decode(_ type: UInt.Type, forKey key: Key) throws -> UInt {
-        try decodeScalar(type, forKey: key, MessagePackDecoding.integer)
-    }
-
-    func decode(_ type: UInt8.Type, forKey key: Key) throws -> UInt8 {
-        try decodeScalar(type, forKey: key, MessagePackDecoding.integer)
-    }
-
-    func decode(_ type: UInt16.Type, forKey key: Key) throws -> UInt16 {
-        try decodeScalar(type, forKey: key, MessagePackDecoding.integer)
-    }
-
-    func decode(_ type: UInt32.Type, forKey key: Key) throws -> UInt32 {
-        try decodeScalar(type, forKey: key, MessagePackDecoding.integer)
-    }
-
-    func decode(_ type: UInt64.Type, forKey key: Key) throws -> UInt64 {
-        try decodeScalar(type, forKey: key, MessagePackDecoding.integer)
-    }
-
-    func decode<T: Decodable>(_ type: T.Type, forKey key: Key) throws -> T {
-        var parser = context.parser(at: try requireOffset(key))
-        return try MessagePackDecoding.unwrap(
-            type, parser: &parser, context: context, codingPath: codingPath + [key])
-    }
-
-    func nestedContainer<NestedKey: CodingKey>(
-        keyedBy type: NestedKey.Type, forKey key: Key
-    ) throws -> KeyedDecodingContainer<NestedKey> {
-        let impl = MessagePackDecoderImpl(
-            context: context, offset: try requireOffset(key), codingPath: codingPath + [key])
-        return try impl.container(keyedBy: NestedKey.self)
-    }
-
-    func nestedUnkeyedContainer(forKey key: Key) throws -> UnkeyedDecodingContainer {
-        let impl = MessagePackDecoderImpl(
-            context: context, offset: try requireOffset(key), codingPath: codingPath + [key])
-        return try impl.unkeyedContainer()
-    }
-
-    /// Mirroring `JSONDecoder`, a missing entry yields a decoder positioned
-    /// on a nil value rather than throwing `keyNotFound`.
-    private func superDecoder(stringValue: String, intValue: Int?, key: CodingKey) -> Decoder {
-        guard let offset = valueOffset(stringValue: stringValue, intValue: intValue) else {
-            return MessagePackNilDecoder(
-                codingPath: codingPath + [key], userInfo: context.userInfo)
-        }
-        return MessagePackDecoderImpl(
-            context: context, offset: offset, codingPath: codingPath + [key])
-    }
-
-    func superDecoder() throws -> Decoder {
-        let superKey = MessagePackCodingKey.super
-        return superDecoder(stringValue: superKey.stringValue, intValue: nil, key: superKey)
-    }
-
-    func superDecoder(forKey key: Key) throws -> Decoder {
-        superDecoder(stringValue: key.stringValue, intValue: key.intValue, key: key)
-    }
-}
-
-// MARK: - Nil decoder
-
-/// Decoder representing an absent value, returned by `superDecoder()` when
-/// the wire map has no matching entry (`JSONDecoder` behaves the same way,
-/// treating the missing entry as null).
-struct MessagePackNilDecoder: Decoder, SingleValueDecodingContainer {
-    let codingPath: [CodingKey]
-    let userInfo: [CodingUserInfoKey: Any]
-
-    private func valueNotFound(_ type: Any.Type) -> DecodingError {
-        .valueNotFound(
-            type,
-            DecodingError.Context(
-                codingPath: codingPath,
-                debugDescription: "Cannot decode \(type) -- found nil value instead"
-            ))
-    }
-
-    func container<Key: CodingKey>(keyedBy type: Key.Type) throws -> KeyedDecodingContainer<Key> {
-        throw valueNotFound(KeyedDecodingContainer<Key>.self)
-    }
-
-    func unkeyedContainer() throws -> UnkeyedDecodingContainer {
-        throw valueNotFound(UnkeyedDecodingContainer.self)
-    }
-
-    func singleValueContainer() throws -> SingleValueDecodingContainer {
-        self
-    }
-
-    func decodeNil() -> Bool { true }
-
-    func decode(_ type: Bool.Type) throws -> Bool { throw valueNotFound(type) }
-    func decode(_ type: String.Type) throws -> String { throw valueNotFound(type) }
-    func decode(_ type: Double.Type) throws -> Double { throw valueNotFound(type) }
-    func decode(_ type: Float.Type) throws -> Float { throw valueNotFound(type) }
-    func decode(_ type: Int.Type) throws -> Int { throw valueNotFound(type) }
-    func decode(_ type: Int8.Type) throws -> Int8 { throw valueNotFound(type) }
-    func decode(_ type: Int16.Type) throws -> Int16 { throw valueNotFound(type) }
-    func decode(_ type: Int32.Type) throws -> Int32 { throw valueNotFound(type) }
-    func decode(_ type: Int64.Type) throws -> Int64 { throw valueNotFound(type) }
-    func decode(_ type: UInt.Type) throws -> UInt { throw valueNotFound(type) }
-    func decode(_ type: UInt8.Type) throws -> UInt8 { throw valueNotFound(type) }
-    func decode(_ type: UInt16.Type) throws -> UInt16 { throw valueNotFound(type) }
-    func decode(_ type: UInt32.Type) throws -> UInt32 { throw valueNotFound(type) }
-    func decode(_ type: UInt64.Type) throws -> UInt64 { throw valueNotFound(type) }
-
-    func decode<T: Decodable>(_ type: T.Type) throws -> T {
-        // Lets Optional<T> decode as nil via its own conformance; anything
-        // else fails with valueNotFound from the container requests above.
-        try T(from: self)
-    }
-}
-
-// MARK: - Unkeyed container
-
-struct MessagePackUnkeyedDecodingContainer: UnkeyedDecodingContainer {
-    let context: MessagePackDecodingContext
-    let codingPath: [CodingKey]
-    let elementCount: Int
-    /// Where this array value starts, for the end-of-container memo.
-    let startOffset: Int
-    /// Cursor positioned at the next element to decode.
-    var parser: MessagePackSerializer.Parser
-    var currentIndex = 0
-
-    var count: Int? { elementCount }
-    var isAtEnd: Bool { currentIndex >= elementCount }
-
-    /// Advances the element index; on decoding the final element, records
-    /// where this array ends so `unwrap` can reuse it instead of re-skipping.
-    @inline(__always)
-    private mutating func advanceIndex() {
-        currentIndex += 1
-        if currentIndex == elementCount {
-            context.memoStart = startOffset
-            context.memoEnd = parser.offset
-        }
-    }
-
-    private func checkEnd(_ type: Any.Type) throws {
-        if currentIndex >= elementCount {
-            throw DecodingError.valueNotFound(
-                type,
-                DecodingError.Context(
-                    codingPath: codingPath + [MessagePackCodingKey(index: currentIndex)],
-                    debugDescription: "Unkeyed container is at end"
-                ))
-        }
-    }
-
-    mutating func decodeNil() throws -> Bool {
-        try checkEnd(Any?.self)
-        if ((try? parser.peekFormat()) ?? 0xc1) == 0xc0 {
-            parser.offset += 1
-            advanceIndex()
-            return true
-        }
-        return false
-    }
-
-    private mutating func decodeScalar<T>(
-        _ type: T.Type,
-        _ read: (inout MessagePackDecoding.Parser) throws(MessagePackDecodeFailure) -> T
-    ) throws -> T {
-        try checkEnd(type)
-        // On failure, rewind to the element start so the cursor stays in
-        // sync with `currentIndex` — callers may catch the error and retry
-        // with a different type (`try? decode(A.self)` fallback patterns).
-        let elementStart = parser.offset
-        do throws(MessagePackDecodeFailure) {
-            let value = try read(&parser)
-            advanceIndex()
-            return value
-        } catch {
-            parser.offset = elementStart
-            throw MessagePackDecoding.decodingError(
-                error, type: type, parser: parser,
-                path: codingPath + [MessagePackCodingKey(index: currentIndex)])
-        }
-    }
-
-    mutating func decode(_ type: Bool.Type) throws -> Bool {
-        try decodeScalar(type, MessagePackDecoding.bool)
-    }
-
-    mutating func decode(_ type: String.Type) throws -> String {
-        try decodeScalar(type, MessagePackDecoding.string)
-    }
-
-    mutating func decode(_ type: Double.Type) throws -> Double {
-        try decodeScalar(type, MessagePackDecoding.double)
-    }
-
-    mutating func decode(_ type: Float.Type) throws -> Float {
-        try decodeScalar(type, MessagePackDecoding.float)
-    }
-
-    mutating func decode(_ type: Int.Type) throws -> Int {
-        try decodeScalar(type, MessagePackDecoding.integer)
-    }
-
-    mutating func decode(_ type: Int8.Type) throws -> Int8 {
-        try decodeScalar(type, MessagePackDecoding.integer)
-    }
-
-    mutating func decode(_ type: Int16.Type) throws -> Int16 {
-        try decodeScalar(type, MessagePackDecoding.integer)
-    }
-
-    mutating func decode(_ type: Int32.Type) throws -> Int32 {
-        try decodeScalar(type, MessagePackDecoding.integer)
-    }
-
-    mutating func decode(_ type: Int64.Type) throws -> Int64 {
-        try decodeScalar(type, MessagePackDecoding.integer)
-    }
-
-    mutating func decode(_ type: UInt.Type) throws -> UInt {
-        try decodeScalar(type, MessagePackDecoding.integer)
-    }
-
-    mutating func decode(_ type: UInt8.Type) throws -> UInt8 {
-        try decodeScalar(type, MessagePackDecoding.integer)
-    }
-
-    mutating func decode(_ type: UInt16.Type) throws -> UInt16 {
-        try decodeScalar(type, MessagePackDecoding.integer)
-    }
-
-    mutating func decode(_ type: UInt32.Type) throws -> UInt32 {
-        try decodeScalar(type, MessagePackDecoding.integer)
-    }
-
-    mutating func decode(_ type: UInt64.Type) throws -> UInt64 {
-        try decodeScalar(type, MessagePackDecoding.integer)
-    }
-
-    mutating func decode<T: Decodable>(_ type: T.Type) throws -> T {
-        try checkEnd(type)
-        // Local copies so the lazy coding-path closure does not capture
-        // `self` while `parser` is passed inout.
-        let parentPath = codingPath
-        let index = currentIndex
-        let value = try MessagePackDecoding.unwrap(
-            type, parser: &parser, context: context,
-            codingPath: parentPath + [MessagePackCodingKey(index: index)])
-        advanceIndex()
-        return value
-    }
-
-    mutating func nestedContainer<NestedKey: CodingKey>(
-        keyedBy type: NestedKey.Type
-    ) throws -> KeyedDecodingContainer<NestedKey> {
-        try checkEnd(KeyedDecodingContainer<NestedKey>.self)
-        let path = codingPath + [MessagePackCodingKey(index: currentIndex)]
-        let impl = MessagePackDecoderImpl(context: context, offset: parser.offset, codingPath: path)
-        let container = try impl.container(keyedBy: NestedKey.self)
-        try MessagePackDecoding.skip(&parser, path: path)
-        advanceIndex()
-        return container
-    }
-
-    mutating func nestedUnkeyedContainer() throws -> UnkeyedDecodingContainer {
-        try checkEnd(UnkeyedDecodingContainer.self)
-        let path = codingPath + [MessagePackCodingKey(index: currentIndex)]
-        let impl = MessagePackDecoderImpl(context: context, offset: parser.offset, codingPath: path)
-        let container = try impl.unkeyedContainer()
-        try MessagePackDecoding.skip(&parser, path: path)
-        advanceIndex()
-        return container
-    }
-
-    mutating func superDecoder() throws -> Decoder {
-        try checkEnd(Decoder.self)
-        let path = codingPath + [MessagePackCodingKey(index: currentIndex)]
-        let impl = MessagePackDecoderImpl(context: context, offset: parser.offset, codingPath: path)
-        try MessagePackDecoding.skip(&parser, path: path)
-        advanceIndex()
-        return impl
-    }
-}
