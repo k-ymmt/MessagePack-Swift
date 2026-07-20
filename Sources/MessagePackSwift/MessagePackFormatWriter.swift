@@ -313,22 +313,57 @@ extension MessagePackFormatSink {
     mutating func writeValidatedValue(
         _ value: MessagePackValue, stack: inout [MessagePackValueFrame]
     ) throws(MessagePackError) {
-        // Only the length-carrying cases need checking; the scalars are
-        // written exactly as `writeValue` writes them, so delegate rather
-        // than restating all sixteen cases.
+        // Deliberately restates all sixteen cases instead of validating and
+        // then delegating to `writeValue`. Delegating reads each payload a
+        // second time, which is not free: `Data` is refcounted and `.ext` is
+        // `indirect`, so binding those payloads twice adds a retain/release
+        // pair. Measured in SIL, every delegating variant tried came out
+        // with more ARC traffic than this duplication (7 ARC ops here vs 13
+        // when the whole value is delegated, 14 when only the scalars are).
+        // Keep the two switches in sync by hand.
         switch value {
+        case .nil:
+            writeByte(0xc0)
+        case .bool(let v):
+            writeByte(v ? 0xc3 : 0xc2)
+        case .int8(let v):
+            writeInt(Int64(v))
+        case .int16(let v):
+            writeInt(Int64(v))
+        case .int32(let v):
+            writeInt(Int64(v))
+        case .int64(let v):
+            writeInt(v)
+        case .uint8(let v):
+            writeUInt(UInt64(v))
+        case .uint16(let v):
+            writeUInt(UInt64(v))
+        case .uint32(let v):
+            writeUInt(UInt64(v))
+        case .uint64(let v):
+            writeUInt(v)
+        case .float32(let v):
+            writeFloat(v)
+        case .float64(let v):
+            writeDouble(v)
         case .string(let s):
             guard s.utf8.count <= MessagePackLimits.maxLength else { throw .valueTooLarge }
-        case .binary(let d), .ext(_, let d):
+            writeString(s)
+        case .binary(let d):
             guard d.count <= MessagePackLimits.maxLength else { throw .valueTooLarge }
+            writeBinary(d)
         case .array(let elements):
             guard elements.count <= MessagePackLimits.maxLength else { throw .valueTooLarge }
+            writeArrayHeader(count: elements.count)
+            if !elements.isEmpty { stack.append(MessagePackValueFrame(items: elements)) }
         case .map(let entries):
             guard entries.count <= MessagePackLimits.maxLength else { throw .valueTooLarge }
-        default:
-            break
+            writeMapHeader(count: entries.count)
+            if !entries.isEmpty { stack.append(MessagePackValueFrame(map: entries)) }
+        case .ext(let type, let d):
+            guard d.count <= MessagePackLimits.maxLength else { throw .valueTooLarge }
+            writeExt(type: type, data: d)
         }
-        writeValue(value, stack: &stack)
     }
 
     /// Walks a value tree iteratively (no recursion), so hostile or extremely
