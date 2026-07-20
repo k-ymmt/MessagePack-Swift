@@ -186,7 +186,7 @@ p50 wall clock, same fixtures as the Codable table:
 
 ## Benchmarks
 
-Uses [ordo-one/package-benchmark](https://github.com/ordo-one/package-benchmark):
+Uses [ordo-one/benchmark](https://github.com/ordo-one/benchmark):
 
 ```sh
 brew install jemalloc   # once

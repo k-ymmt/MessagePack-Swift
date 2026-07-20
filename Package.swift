@@ -19,7 +19,7 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(url: "https://github.com/ordo-one/package-benchmark", from: "1.29.0"),
+        .package(url: "https://github.com/ordo-one/benchmark", from: "1.29.0"),
         .package(url: "https://github.com/swiftlang/swift-syntax", "600.0.0"..<"700.0.0"),
     ],
     targets: [
@@ -54,12 +54,12 @@ let package = Package(
         .executableTarget(
             name: "MessagePackBenchmarks",
             dependencies: [
-                .product(name: "Benchmark", package: "package-benchmark"),
+                .product(name: "Benchmark", package: "benchmark"),
                 "MessagePackSwift",
             ],
             path: "Benchmarks/MessagePackBenchmarks",
             plugins: [
-                .plugin(name: "BenchmarkPlugin", package: "package-benchmark"),
+                .plugin(name: "BenchmarkPlugin", package: "benchmark"),
             ],
         ),
     ],

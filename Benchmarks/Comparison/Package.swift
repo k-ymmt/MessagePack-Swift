@@ -17,7 +17,7 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../.."),
-        .package(url: "https://github.com/ordo-one/package-benchmark", from: "1.29.0"),
+        .package(url: "https://github.com/ordo-one/benchmark", from: "1.29.0"),
         .package(url: "https://github.com/fumoboy007/msgpack-swift.git", from: "2.0.6"),
         .package(url: "https://github.com/a2/MessagePack.swift.git", from: "4.0.0"),
         .package(url: "https://github.com/nnabeyang/swift-msgpack.git", from: "1.2.1"),
@@ -27,7 +27,7 @@ let package = Package(
         .executableTarget(
             name: "ComparisonBenchmarks",
             dependencies: [
-                .product(name: "Benchmark", package: "package-benchmark"),
+                .product(name: "Benchmark", package: "benchmark"),
                 .product(name: "MessagePackSwift", package: "MessagePackSwift"),
                 .product(name: "MPMessagePack", package: "MPMessagePack"),
                 .product(name: "DMMessagePack", package: "msgpack-swift"),
@@ -45,7 +45,7 @@ let package = Package(
                 .swiftLanguageMode(.v5),
             ],
             plugins: [
-                .plugin(name: "BenchmarkPlugin", package: "package-benchmark"),
+                .plugin(name: "BenchmarkPlugin", package: "benchmark"),
             ],
         ),
     ],
