@@ -207,6 +207,38 @@ Results on an Apple Silicon MacBook (arm64, Swift 6.4, release), p50 wall clock:
 
 Deserialization of a flat scalar array performs 1 allocation (the result array); serialization performs the output buffer's growth chain plus the `Data` wrapper (about 9 allocations for a 10k-int array, independent of element count beyond the doubling).
 
+### Comparison with other MessagePack libraries
+
+The `ComparisonBenchmarks` target measures MessagePackSwift against
+[fumoboy007/msgpack-swift](https://github.com/fumoboy007/msgpack-swift),
+[a2/MessagePack.swift](https://github.com/a2/MessagePack.swift),
+[nnabeyang/swift-msgpack](https://github.com/nnabeyang/swift-msgpack), and
+[msgpack/msgpack-objectivec](https://github.com/msgpack/msgpack-objectivec)
+(vendored under `Benchmarks/ThirdParty` with minimal SPM/ARC patches — it has
+no upstream SwiftPM support):
+
+```sh
+swift package benchmark run --target ComparisonBenchmarks
+```
+
+Every library encodes its own natural representation of the same logical
+fixtures and decodes bytes it produced itself (the ObjC library speaks the
+pre-2013 spec, so payloads are not interchangeable with it). Codable-based
+routes decode into typed structs; the "value tree" routes produce a
+MessagePack value enum; the ObjC route produces Foundation
+`NSArray`/`NSDictionary` objects. Same machine and metric as above,
+p50 wall clock:
+
+| Library (route) | structs (1k) encode / decode | int array (10k) encode / decode | string array (1k) encode / decode |
+|---|---|---|---|
+| **MessagePackSwift (macro)** | **43 µs / 228 µs** | 28 µs / **23 µs** | **12 µs / 50 µs** |
+| MessagePackSwift (Codable) | 459 µs / 833 µs | **27 µs** / 26 µs | 16 µs / 50 µs |
+| MessagePackSwift (value tree) | 464 µs / 817 µs | 55 µs / 46 µs | 19 µs / 52 µs |
+| fumoboy007/msgpack-swift (Codable) | 1.11 ms / 1.88 ms | 64 µs / 243 µs | 13 µs / 81 µs |
+| a2/MessagePack.swift (value tree) | 2.07 ms / 1.67 ms | 976 µs / 276 µs | 160 µs / 164 µs |
+| nnabeyang/swift-msgpack (Codable) | 5.70 ms / 4.42 ms | 5.22 ms / 4.34 ms | 615 µs / 552 µs |
+| msgpack-objectivec (Foundation) | 1.11 ms / 1.02 ms | 486 µs / 299 µs | 51 µs / 122 µs |
+
 ## Testing
 
 ```sh
