@@ -213,9 +213,7 @@ Deserialization of a flat scalar array performs 1 allocation (the result array);
 [fumoboy007/msgpack-swift](https://github.com/fumoboy007/msgpack-swift),
 [a2/MessagePack.swift](https://github.com/a2/MessagePack.swift),
 [nnabeyang/swift-msgpack](https://github.com/nnabeyang/swift-msgpack), and
-[gabriel/MPMessagePack](https://github.com/gabriel/MPMessagePack) (vendored
-unmodified under `Benchmarks/Comparison/ThirdParty` — it ships a podspec but no
-SwiftPM manifest).
+[gabriel/MPMessagePack](https://github.com/gabriel/MPMessagePack).
 
 It is a **separate package** that depends on this one by path, so the libraries
 it compares against never enter the dependency graph of MessagePackSwift's own
@@ -235,13 +233,13 @@ machine and metric as above, p50 wall clock:
 
 | Library (route) | structs (1k) encode / decode | int array (10k) encode / decode | string array (1k) encode / decode |
 |---|---|---|---|
-| **MessagePackSwift (macro)** | **43 µs / 227 µs** | 28 µs / **23 µs** | **11 µs / 50 µs** |
-| MessagePackSwift (Codable) | 462 µs / 829 µs | **27 µs** / 25 µs | 16 µs / 50 µs |
-| MessagePackSwift (value tree) | 474 µs / 820 µs | 55 µs / 48 µs | 19 µs / 52 µs |
-| fumoboy007/msgpack-swift (Codable) | 1.12 ms / 1.93 ms | 68 µs / 239 µs | 13 µs / 81 µs |
-| a2/MessagePack.swift (value tree) | 2.07 ms / 1.69 ms | 1.04 ms / 288 µs | 160 µs / 167 µs |
-| gabriel/MPMessagePack (Foundation) | 1.53 ms / 2.68 ms | 1.08 ms / 781 µs | 81 µs / 316 µs |
-| nnabeyang/swift-msgpack (Codable) | 5.88 ms / 4.50 ms | 5.31 ms / 4.31 ms | 622 µs / 564 µs |
+| **MessagePackSwift (macro)** | **43 µs / 227 µs** | 28 µs / **23 µs** | **11 µs** / 53 µs |
+| MessagePackSwift (Codable) | 465 µs / 840 µs | **27 µs** / 25 µs | 16 µs / 55 µs |
+| MessagePackSwift (value tree) | 470 µs / 822 µs | 55 µs / 48 µs | 19 µs / **52 µs** |
+| fumoboy007/msgpack-swift (Codable) | 1.14 ms / 1.94 ms | 68 µs / 239 µs | 13 µs / 84 µs |
+| a2/MessagePack.swift (value tree) | 2.09 ms / 1.69 ms | 994 µs / 285 µs | 160 µs / 167 µs |
+| gabriel/MPMessagePack (Foundation) | 1.54 ms / 2.68 ms | 1.13 ms / 799 µs | 77 µs / 307 µs |
+| nnabeyang/swift-msgpack (Codable) | 5.92 ms / 4.47 ms | 5.97 ms / 4.36 ms | 619 µs / 565 µs |
 
 ## Testing
 

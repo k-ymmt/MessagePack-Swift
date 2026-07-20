@@ -2,7 +2,7 @@ import A2MessagePack
 import Benchmark
 import Foundation
 import MessagePack  // fumoboy007/msgpack-swift (product DMMessagePack)
-import MPMessagePack  // vendored gabriel/MPMessagePack
+import MPMessagePack  // gabriel/MPMessagePack
 import MessagePackSwift
 import SwiftMsgpack  // nnabeyang/swift-msgpack
 

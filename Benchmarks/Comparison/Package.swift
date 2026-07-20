@@ -21,27 +21,15 @@ let package = Package(
         .package(url: "https://github.com/fumoboy007/msgpack-swift.git", from: "2.0.6"),
         .package(url: "https://github.com/a2/MessagePack.swift.git", from: "4.0.0"),
         .package(url: "https://github.com/nnabeyang/swift-msgpack.git", from: "1.2.1"),
-        // MPMessagePack's only dependency; unlike MPMessagePack itself it does
-        // ship a SwiftPM manifest, so it is used as-is rather than vendored.
-        .package(url: "https://github.com/gabriel/GHODictionary.git", from: "1.2.0"),
+        .package(url: "https://github.com/gabriel/MPMessagePack.git", from: "1.6.1"),
     ],
     targets: [
-        // Vendored gabriel/MPMessagePack (no upstream SPM support);
-        // see ThirdParty/MPMessagePack/README.md for what was left out.
-        .target(
-            name: "MPMessagePack",
-            dependencies: [
-                .product(name: "GHODictionary", package: "GHODictionary"),
-            ],
-            path: "ThirdParty/MPMessagePack",
-            publicHeadersPath: "include"
-        ),
         .executableTarget(
             name: "ComparisonBenchmarks",
             dependencies: [
                 .product(name: "Benchmark", package: "package-benchmark"),
                 .product(name: "MessagePackSwift", package: "MessagePackSwift"),
-                "MPMessagePack",
+                .product(name: "MPMessagePack", package: "MPMessagePack"),
                 .product(name: "DMMessagePack", package: "msgpack-swift"),
                 .product(
                     name: "MessagePack",

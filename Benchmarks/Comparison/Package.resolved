@@ -1,5 +1,5 @@
 {
-  "originHash" : "f366b87dca5063afc546a7653610e85acf36493489ec8a3b387afe36eb48498d",
+  "originHash" : "9687d931391cf81c910e0fda321c928df0779407cdf0603e09f454fd2bfd9398",
   "pins" : [
     {
       "identity" : "ghodictionary",
@@ -35,6 +35,15 @@
       "state" : {
         "revision" : "27b35fd49e92fcae395bf8ccb233499d89cc7890",
         "version" : "4.0.0"
+      }
+    },
+    {
+      "identity" : "mpmessagepack",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/gabriel/MPMessagePack.git",
+      "state" : {
+        "revision" : "5e61d2a98fc548101eafd1934a6b09261184db1c",
+        "version" : "1.6.1"
       }
     },
     {
