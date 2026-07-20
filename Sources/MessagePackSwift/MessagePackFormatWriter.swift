@@ -1,5 +1,17 @@
 import Foundation
 
+/// Limits imposed by the MessagePack wire format itself.
+@usableFromInline
+enum MessagePackLimits {
+    /// The longest str/bin/ext payload, array, or map the format can express
+    /// (2^32-1), since every 32-bit header stores its length in a `UInt32`.
+    ///
+    /// A computed property rather than a `static let`: it folds to an
+    /// immediate at every use site, with no lazy global initialization.
+    @inlinable
+    static var maxLength: Int { 0xffff_ffff }
+}
+
 /// A low-level byte sink that MessagePack format emission is generic over.
 ///
 /// ``MessagePackSerializer/Writer`` (pre-sized buffer used by the value-tree
@@ -98,7 +110,8 @@ extension MessagePackFormatSink {
             writeBigEndian(UInt16(truncatingIfNeeded: length))
         } else {
             precondition(
-                length <= 0xffff_ffff, "MessagePack strings are limited to 2^32-1 bytes")
+                length <= MessagePackLimits.maxLength,
+                "MessagePack strings are limited to 2^32-1 bytes")
             writeByte(0xdb)
             writeBigEndian(UInt32(truncatingIfNeeded: length))
         }
@@ -127,7 +140,9 @@ extension MessagePackFormatSink {
             writeByte(0xc5)
             writeBigEndian(UInt16(truncatingIfNeeded: length))
         } else {
-            precondition(length <= 0xffff_ffff, "MessagePack binary is limited to 2^32-1 bytes")
+            precondition(
+                length <= MessagePackLimits.maxLength,
+                "MessagePack binary is limited to 2^32-1 bytes")
             writeByte(0xc6)
             writeBigEndian(UInt32(truncatingIfNeeded: length))
         }
@@ -157,7 +172,8 @@ extension MessagePackFormatSink {
                 writeBigEndian(UInt16(truncatingIfNeeded: length))
             } else {
                 precondition(
-                    length <= 0xffff_ffff, "MessagePack ext payloads are limited to 2^32-1 bytes")
+                    length <= MessagePackLimits.maxLength,
+                    "MessagePack ext payloads are limited to 2^32-1 bytes")
                 writeByte(0xc9)
                 writeBigEndian(UInt32(truncatingIfNeeded: length))
             }
@@ -179,7 +195,9 @@ extension MessagePackFormatSink {
             writeByte(0xdc)
             writeBigEndian(UInt16(truncatingIfNeeded: count))
         } else {
-            precondition(count <= 0xffff_ffff, "MessagePack arrays are limited to 2^32-1 elements")
+            precondition(
+                count <= MessagePackLimits.maxLength,
+                "MessagePack arrays are limited to 2^32-1 elements")
             writeByte(0xdd)
             writeBigEndian(UInt32(truncatingIfNeeded: count))
         }
@@ -194,7 +212,9 @@ extension MessagePackFormatSink {
             writeByte(0xde)
             writeBigEndian(UInt16(truncatingIfNeeded: count))
         } else {
-            precondition(count <= 0xffff_ffff, "MessagePack maps are limited to 2^32-1 entries")
+            precondition(
+                count <= MessagePackLimits.maxLength,
+                "MessagePack maps are limited to 2^32-1 entries")
             writeByte(0xdf)
             writeBigEndian(UInt32(truncatingIfNeeded: count))
         }
@@ -293,48 +313,75 @@ extension MessagePackFormatSink {
     mutating func writeValidatedValue(
         _ value: MessagePackValue, stack: inout [MessagePackValueFrame]
     ) throws(MessagePackError) {
+        // Only the length-carrying cases need checking; the scalars are
+        // written exactly as `writeValue` writes them, so delegate rather
+        // than restating all sixteen cases.
         switch value {
-        case .nil:
-            writeByte(0xc0)
-        case .bool(let v):
-            writeByte(v ? 0xc3 : 0xc2)
-        case .int8(let v):
-            writeInt(Int64(v))
-        case .int16(let v):
-            writeInt(Int64(v))
-        case .int32(let v):
-            writeInt(Int64(v))
-        case .int64(let v):
-            writeInt(v)
-        case .uint8(let v):
-            writeUInt(UInt64(v))
-        case .uint16(let v):
-            writeUInt(UInt64(v))
-        case .uint32(let v):
-            writeUInt(UInt64(v))
-        case .uint64(let v):
-            writeUInt(v)
-        case .float32(let v):
-            writeFloat(v)
-        case .float64(let v):
-            writeDouble(v)
         case .string(let s):
-            guard s.utf8.count <= 0xffff_ffff else { throw MessagePackError.valueTooLarge }
-            writeString(s)
-        case .binary(let d):
-            guard d.count <= 0xffff_ffff else { throw MessagePackError.valueTooLarge }
-            writeBinary(d)
+            guard s.utf8.count <= MessagePackLimits.maxLength else { throw .valueTooLarge }
+        case .binary(let d), .ext(_, let d):
+            guard d.count <= MessagePackLimits.maxLength else { throw .valueTooLarge }
         case .array(let elements):
-            guard elements.count <= 0xffff_ffff else { throw MessagePackError.valueTooLarge }
-            writeArrayHeader(count: elements.count)
-            if !elements.isEmpty { stack.append(MessagePackValueFrame(items: elements)) }
+            guard elements.count <= MessagePackLimits.maxLength else { throw .valueTooLarge }
         case .map(let entries):
-            guard entries.count <= 0xffff_ffff else { throw MessagePackError.valueTooLarge }
-            writeMapHeader(count: entries.count)
-            if !entries.isEmpty { stack.append(MessagePackValueFrame(map: entries)) }
-        case .ext(let type, let d):
-            guard d.count <= 0xffff_ffff else { throw MessagePackError.valueTooLarge }
-            writeExt(type: type, data: d)
+            guard entries.count <= MessagePackLimits.maxLength else { throw .valueTooLarge }
+        default:
+            break
+        }
+        writeValue(value, stack: &stack)
+    }
+
+    /// Walks a value tree iteratively (no recursion), so hostile or extremely
+    /// deep trees cannot overflow the call stack, emitting each value with
+    /// `emit`. ``write(_:)`` and ``writeValidated(_:)`` differ only in the
+    /// emit step, so the traversal itself lives here once.
+    ///
+    /// `emit` is a non-escaping closure literal at both call sites and this
+    /// method is always inlined, so the walk specializes into each caller with
+    /// no indirect call per value. `E` is `Never` for the non-validating
+    /// caller, which erases its error handling entirely.
+    @inline(__always)
+    private mutating func writeTree<E: Error>(
+        _ root: MessagePackValue,
+        emit: (inout Self, MessagePackValue, inout [MessagePackValueFrame]) throws(E) -> Void
+    ) throws(E) {
+        var stack: [MessagePackValueFrame] = []
+        try emit(&self, root, &stack)
+        while !stack.isEmpty {
+            let top = stack.count - 1
+            if stack[top].isMap {
+                if let pending = stack[top].pending {
+                    stack[top].pending = nil
+                    try emit(&self, pending, &stack)
+                    continue
+                }
+                let index = stack[top].mapIndex
+                guard index != stack[top].map.endIndex else {
+                    stack.removeLast()
+                    continue
+                }
+                stack[top].mapIndex = stack[top].map.index(after: index)
+                let entry = stack[top].map[index]
+                stack[top].pending = entry.value
+                try emit(&self, entry.key, &stack)
+            } else {
+                // Emit consecutive children in a tight loop, breaking only
+                // when a child pushes a nested container frame.
+                let items = stack[top].items
+                let count = items.count
+                var index = stack[top].index
+                while index < count {
+                    let child = items[index]
+                    index += 1
+                    try emit(&self, child, &stack)
+                    if stack.count != top + 1 { break }
+                }
+                if index == count && stack.count == top + 1 {
+                    stack.removeLast()
+                } else {
+                    stack[top].index = index
+                }
+            }
         }
     }
 
@@ -343,86 +390,16 @@ extension MessagePackFormatSink {
     /// limits. Iterative like ``write(_:)``, so hostile or extremely deep
     /// trees cannot overflow the call stack.
     mutating func writeValidated(_ root: MessagePackValue) throws(MessagePackError) {
-        var stack: [MessagePackValueFrame] = []
-        try writeValidatedValue(root, stack: &stack)
-        while !stack.isEmpty {
-            let top = stack.count - 1
-            if stack[top].isMap {
-                if let pending = stack[top].pending {
-                    stack[top].pending = nil
-                    try writeValidatedValue(pending, stack: &stack)
-                    continue
-                }
-                let index = stack[top].mapIndex
-                guard index != stack[top].map.endIndex else {
-                    stack.removeLast()
-                    continue
-                }
-                stack[top].mapIndex = stack[top].map.index(after: index)
-                let entry = stack[top].map[index]
-                stack[top].pending = entry.value
-                try writeValidatedValue(entry.key, stack: &stack)
-            } else {
-                // Emit consecutive children in a tight loop, breaking only
-                // when a child pushes a nested container frame.
-                let items = stack[top].items
-                let count = items.count
-                var index = stack[top].index
-                while index < count {
-                    let child = items[index]
-                    index += 1
-                    try writeValidatedValue(child, stack: &stack)
-                    if stack.count != top + 1 { break }
-                }
-                if index == count && stack.count == top + 1 {
-                    stack.removeLast()
-                } else {
-                    stack[top].index = index
-                }
-            }
+        try writeTree(root) { (sink, value, stack) throws(MessagePackError) in
+            try sink.writeValidatedValue(value, stack: &stack)
         }
     }
 
     /// Writes a whole value tree iteratively (no recursion), so hostile or
     /// extremely deep trees cannot overflow the call stack.
     mutating func write(_ root: MessagePackValue) {
-        var stack: [MessagePackValueFrame] = []
-        writeValue(root, stack: &stack)
-        while !stack.isEmpty {
-            let top = stack.count - 1
-            if stack[top].isMap {
-                if let pending = stack[top].pending {
-                    stack[top].pending = nil
-                    writeValue(pending, stack: &stack)
-                    continue
-                }
-                let index = stack[top].mapIndex
-                guard index != stack[top].map.endIndex else {
-                    stack.removeLast()
-                    continue
-                }
-                stack[top].mapIndex = stack[top].map.index(after: index)
-                let entry = stack[top].map[index]
-                stack[top].pending = entry.value
-                writeValue(entry.key, stack: &stack)
-            } else {
-                // Emit consecutive children in a tight loop, breaking only
-                // when a child pushes a nested container frame.
-                let items = stack[top].items
-                let count = items.count
-                var index = stack[top].index
-                while index < count {
-                    let child = items[index]
-                    index += 1
-                    writeValue(child, stack: &stack)
-                    if stack.count != top + 1 { break }
-                }
-                if index == count && stack.count == top + 1 {
-                    stack.removeLast()
-                } else {
-                    stack[top].index = index
-                }
-            }
+        writeTree(root) { sink, value, stack in
+            sink.writeValue(value, stack: &stack)
         }
     }
 }

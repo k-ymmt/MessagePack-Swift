@@ -75,16 +75,29 @@ struct MessagePackDeferredSingleValueEncodingContainer: SingleValueEncodingConta
     mutating func encode(_ value: String) throws { begin().pointee.buffer.writeString(value) }
     mutating func encode(_ value: Double) throws { begin().pointee.buffer.writeDouble(value) }
     mutating func encode(_ value: Float) throws { begin().pointee.buffer.writeFloat(value) }
-    mutating func encode(_ value: Int) throws { begin().pointee.buffer.writeInt(Int64(value)) }
-    mutating func encode(_ value: Int8) throws { begin().pointee.buffer.writeInt(Int64(value)) }
-    mutating func encode(_ value: Int16) throws { begin().pointee.buffer.writeInt(Int64(value)) }
-    mutating func encode(_ value: Int32) throws { begin().pointee.buffer.writeInt(Int64(value)) }
-    mutating func encode(_ value: Int64) throws { begin().pointee.buffer.writeInt(value) }
-    mutating func encode(_ value: UInt) throws { begin().pointee.buffer.writeUInt(UInt64(value)) }
-    mutating func encode(_ value: UInt8) throws { begin().pointee.buffer.writeUInt(UInt64(value)) }
-    mutating func encode(_ value: UInt16) throws { begin().pointee.buffer.writeUInt(UInt64(value)) }
-    mutating func encode(_ value: UInt32) throws { begin().pointee.buffer.writeUInt(UInt64(value)) }
-    mutating func encode(_ value: UInt64) throws { begin().pointee.buffer.writeUInt(value) }
+    mutating func encode(_ value: Int) throws { encodeSigned(value) }
+    mutating func encode(_ value: Int8) throws { encodeSigned(value) }
+    mutating func encode(_ value: Int16) throws { encodeSigned(value) }
+    mutating func encode(_ value: Int32) throws { encodeSigned(value) }
+    mutating func encode(_ value: Int64) throws { encodeSigned(value) }
+    mutating func encode(_ value: UInt) throws { encodeUnsigned(value) }
+    mutating func encode(_ value: UInt8) throws { encodeUnsigned(value) }
+    mutating func encode(_ value: UInt16) throws { encodeUnsigned(value) }
+    mutating func encode(_ value: UInt32) throws { encodeUnsigned(value) }
+    mutating func encode(_ value: UInt64) throws { encodeUnsigned(value) }
+
+    // The ten integer overloads differ only in the width they widen from.
+    // `writeInt`/`writeUInt` then pick the smallest wire format for the
+    // widened value, so widening here costs nothing on the wire.
+    @inline(__always)
+    private func encodeSigned(_ value: some SignedInteger & FixedWidthInteger) {
+        begin().pointee.buffer.writeInt(Int64(value))
+    }
+
+    @inline(__always)
+    private func encodeUnsigned(_ value: some UnsignedInteger & FixedWidthInteger) {
+        begin().pointee.buffer.writeUInt(UInt64(value))
+    }
 
     mutating func encode<T: Encodable>(_ value: T) throws {
         _ = begin()
@@ -131,54 +144,30 @@ struct MessagePackKeyedEncodingContainer<Key: CodingKey>: KeyedEncodingContainer
         impl.state.pointee.buffer.writeFloat(value)
     }
 
-    mutating func encode(_ value: Int, forKey key: Key) throws {
+    mutating func encode(_ value: Int, forKey key: Key) throws { encodeSigned(value, forKey: key) }
+    mutating func encode(_ value: Int8, forKey key: Key) throws { encodeSigned(value, forKey: key) }
+    mutating func encode(_ value: Int16, forKey key: Key) throws { encodeSigned(value, forKey: key) }
+    mutating func encode(_ value: Int32, forKey key: Key) throws { encodeSigned(value, forKey: key) }
+    mutating func encode(_ value: Int64, forKey key: Key) throws { encodeSigned(value, forKey: key) }
+    mutating func encode(_ value: UInt, forKey key: Key) throws { encodeUnsigned(value, forKey: key) }
+    mutating func encode(_ value: UInt8, forKey key: Key) throws { encodeUnsigned(value, forKey: key) }
+    mutating func encode(_ value: UInt16, forKey key: Key) throws { encodeUnsigned(value, forKey: key) }
+    mutating func encode(_ value: UInt32, forKey key: Key) throws { encodeUnsigned(value, forKey: key) }
+    mutating func encode(_ value: UInt64, forKey key: Key) throws { encodeUnsigned(value, forKey: key) }
+
+    // The ten integer overloads differ only in the width they widen from.
+    // `writeInt`/`writeUInt` then pick the smallest wire format for the
+    // widened value, so widening here costs nothing on the wire.
+    @inline(__always)
+    private func encodeSigned(_ value: some SignedInteger & FixedWidthInteger, forKey key: Key) {
         beginEntry(key)
         impl.state.pointee.buffer.writeInt(Int64(value))
     }
 
-    mutating func encode(_ value: Int8, forKey key: Key) throws {
-        beginEntry(key)
-        impl.state.pointee.buffer.writeInt(Int64(value))
-    }
-
-    mutating func encode(_ value: Int16, forKey key: Key) throws {
-        beginEntry(key)
-        impl.state.pointee.buffer.writeInt(Int64(value))
-    }
-
-    mutating func encode(_ value: Int32, forKey key: Key) throws {
-        beginEntry(key)
-        impl.state.pointee.buffer.writeInt(Int64(value))
-    }
-
-    mutating func encode(_ value: Int64, forKey key: Key) throws {
-        beginEntry(key)
-        impl.state.pointee.buffer.writeInt(value)
-    }
-
-    mutating func encode(_ value: UInt, forKey key: Key) throws {
+    @inline(__always)
+    private func encodeUnsigned(_ value: some UnsignedInteger & FixedWidthInteger, forKey key: Key) {
         beginEntry(key)
         impl.state.pointee.buffer.writeUInt(UInt64(value))
-    }
-
-    mutating func encode(_ value: UInt8, forKey key: Key) throws {
-        beginEntry(key)
-        impl.state.pointee.buffer.writeUInt(UInt64(value))
-    }
-
-    mutating func encode(_ value: UInt16, forKey key: Key) throws {
-        beginEntry(key)
-        impl.state.pointee.buffer.writeUInt(UInt64(value))
-    }
-
-    mutating func encode(_ value: UInt32, forKey key: Key) throws {
-        beginEntry(key)
-        impl.state.pointee.buffer.writeUInt(UInt64(value))
-    }
-
-    mutating func encode(_ value: UInt64, forKey key: Key) throws {
-        beginEntry(key)
-        impl.state.pointee.buffer.writeUInt(value)
     }
 
     mutating func encode<T: Encodable>(_ value: T, forKey key: Key) throws {
@@ -266,54 +255,30 @@ struct MessagePackUnkeyedEncodingContainer: UnkeyedEncodingContainer {
         impl.state.pointee.buffer.writeFloat(value)
     }
 
-    mutating func encode(_ value: Int) throws {
+    mutating func encode(_ value: Int) throws { encodeSigned(value) }
+    mutating func encode(_ value: Int8) throws { encodeSigned(value) }
+    mutating func encode(_ value: Int16) throws { encodeSigned(value) }
+    mutating func encode(_ value: Int32) throws { encodeSigned(value) }
+    mutating func encode(_ value: Int64) throws { encodeSigned(value) }
+    mutating func encode(_ value: UInt) throws { encodeUnsigned(value) }
+    mutating func encode(_ value: UInt8) throws { encodeUnsigned(value) }
+    mutating func encode(_ value: UInt16) throws { encodeUnsigned(value) }
+    mutating func encode(_ value: UInt32) throws { encodeUnsigned(value) }
+    mutating func encode(_ value: UInt64) throws { encodeUnsigned(value) }
+
+    // The ten integer overloads differ only in the width they widen from.
+    // `writeInt`/`writeUInt` then pick the smallest wire format for the
+    // widened value, so widening here costs nothing on the wire.
+    @inline(__always)
+    private func encodeSigned(_ value: some SignedInteger & FixedWidthInteger) {
         beginElement()
         impl.state.pointee.buffer.writeInt(Int64(value))
     }
 
-    mutating func encode(_ value: Int8) throws {
-        beginElement()
-        impl.state.pointee.buffer.writeInt(Int64(value))
-    }
-
-    mutating func encode(_ value: Int16) throws {
-        beginElement()
-        impl.state.pointee.buffer.writeInt(Int64(value))
-    }
-
-    mutating func encode(_ value: Int32) throws {
-        beginElement()
-        impl.state.pointee.buffer.writeInt(Int64(value))
-    }
-
-    mutating func encode(_ value: Int64) throws {
-        beginElement()
-        impl.state.pointee.buffer.writeInt(value)
-    }
-
-    mutating func encode(_ value: UInt) throws {
+    @inline(__always)
+    private func encodeUnsigned(_ value: some UnsignedInteger & FixedWidthInteger) {
         beginElement()
         impl.state.pointee.buffer.writeUInt(UInt64(value))
-    }
-
-    mutating func encode(_ value: UInt8) throws {
-        beginElement()
-        impl.state.pointee.buffer.writeUInt(UInt64(value))
-    }
-
-    mutating func encode(_ value: UInt16) throws {
-        beginElement()
-        impl.state.pointee.buffer.writeUInt(UInt64(value))
-    }
-
-    mutating func encode(_ value: UInt32) throws {
-        beginElement()
-        impl.state.pointee.buffer.writeUInt(UInt64(value))
-    }
-
-    mutating func encode(_ value: UInt64) throws {
-        beginElement()
-        impl.state.pointee.buffer.writeUInt(value)
     }
 
     mutating func encode<T: Encodable>(_ value: T) throws {
@@ -393,54 +358,30 @@ struct MessagePackSingleValueEncodingContainer: SingleValueEncodingContainer {
         impl.state.pointee.buffer.writeFloat(value)
     }
 
-    mutating func encode(_ value: Int) throws {
+    mutating func encode(_ value: Int) throws { encodeSigned(value) }
+    mutating func encode(_ value: Int8) throws { encodeSigned(value) }
+    mutating func encode(_ value: Int16) throws { encodeSigned(value) }
+    mutating func encode(_ value: Int32) throws { encodeSigned(value) }
+    mutating func encode(_ value: Int64) throws { encodeSigned(value) }
+    mutating func encode(_ value: UInt) throws { encodeUnsigned(value) }
+    mutating func encode(_ value: UInt8) throws { encodeUnsigned(value) }
+    mutating func encode(_ value: UInt16) throws { encodeUnsigned(value) }
+    mutating func encode(_ value: UInt32) throws { encodeUnsigned(value) }
+    mutating func encode(_ value: UInt64) throws { encodeUnsigned(value) }
+
+    // The ten integer overloads differ only in the width they widen from.
+    // `writeInt`/`writeUInt` then pick the smallest wire format for the
+    // widened value, so widening here costs nothing on the wire.
+    @inline(__always)
+    private func encodeSigned(_ value: some SignedInteger & FixedWidthInteger) {
         beginValue()
         impl.state.pointee.buffer.writeInt(Int64(value))
     }
 
-    mutating func encode(_ value: Int8) throws {
-        beginValue()
-        impl.state.pointee.buffer.writeInt(Int64(value))
-    }
-
-    mutating func encode(_ value: Int16) throws {
-        beginValue()
-        impl.state.pointee.buffer.writeInt(Int64(value))
-    }
-
-    mutating func encode(_ value: Int32) throws {
-        beginValue()
-        impl.state.pointee.buffer.writeInt(Int64(value))
-    }
-
-    mutating func encode(_ value: Int64) throws {
-        beginValue()
-        impl.state.pointee.buffer.writeInt(value)
-    }
-
-    mutating func encode(_ value: UInt) throws {
+    @inline(__always)
+    private func encodeUnsigned(_ value: some UnsignedInteger & FixedWidthInteger) {
         beginValue()
         impl.state.pointee.buffer.writeUInt(UInt64(value))
-    }
-
-    mutating func encode(_ value: UInt8) throws {
-        beginValue()
-        impl.state.pointee.buffer.writeUInt(UInt64(value))
-    }
-
-    mutating func encode(_ value: UInt16) throws {
-        beginValue()
-        impl.state.pointee.buffer.writeUInt(UInt64(value))
-    }
-
-    mutating func encode(_ value: UInt32) throws {
-        beginValue()
-        impl.state.pointee.buffer.writeUInt(UInt64(value))
-    }
-
-    mutating func encode(_ value: UInt64) throws {
-        beginValue()
-        impl.state.pointee.buffer.writeUInt(value)
     }
 
     mutating func encode<T: Encodable>(_ value: T) throws {
