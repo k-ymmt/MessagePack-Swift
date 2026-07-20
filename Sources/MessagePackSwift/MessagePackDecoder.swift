@@ -301,6 +301,47 @@ enum MessagePackDecoding {
         }
     }
 
+    /// Decodes an array of a natively represented element type with a tight
+    /// loop over the raw bytes, bypassing the unkeyed-container machinery.
+    /// Error behavior matches the machinery: element failures are reported at
+    /// the element's index in the coding path.
+    private static func primitiveArray<E>(
+        _ parser: inout Parser,
+        _ codingPath: () -> [CodingKey],
+        _ read: (inout Parser) throws(MessagePackDecodeFailure) -> E
+    ) throws -> [E] {
+        let startOffset = parser.offset
+        let headerCount: Int?
+        do throws(MessagePackError) {
+            headerCount = try parser.readArrayHeader()
+        } catch {
+            throw corrupted(error, codingPath())
+        }
+        guard let elementCount = headerCount else {
+            parser.offset = startOffset
+            throw wrongType([E].self, parser, codingPath())
+        }
+        // Each element takes at least one byte; reject hostile counts before
+        // reserving storage.
+        guard elementCount <= parser.count - parser.offset else {
+            throw corrupted(.insufficientData, codingPath())
+        }
+        var result: [E] = []
+        result.reserveCapacity(Swift.min(elementCount, messagePackMaxPreallocation))
+        for index in 0..<elementCount {
+            let elementStart = parser.offset
+            do throws(MessagePackDecodeFailure) {
+                result.append(try read(&parser))
+            } catch {
+                parser.offset = elementStart
+                throw decodingError(
+                    error, type: E.self, parser: parser,
+                    path: codingPath() + [MessagePackCodingKey(index: index)])
+            }
+        }
+        return result
+    }
+
     /// Decodes a value of arbitrary `Decodable` type at the parser's current
     /// position, advancing the parser past it. Types MessagePack represents
     /// natively decode directly, bypassing the `Decodable` container
@@ -335,6 +376,20 @@ enum MessagePackDecoding {
         if T.self == MessagePackTimestamp.self {
             return try scalar(MessagePackTimestamp.self, &parser, startOffset, codingPath, timestamp) as! T
         }
+        if T.self == [Int].self { return try primitiveArray(&parser, codingPath, integer) as [Int] as! T }
+        if T.self == [String].self { return try primitiveArray(&parser, codingPath, string) as! T }
+        if T.self == [Double].self { return try primitiveArray(&parser, codingPath, double) as! T }
+        if T.self == [Bool].self { return try primitiveArray(&parser, codingPath, bool) as! T }
+        if T.self == [Float].self { return try primitiveArray(&parser, codingPath, float) as! T }
+        if T.self == [Int64].self { return try primitiveArray(&parser, codingPath, integer) as [Int64] as! T }
+        if T.self == [UInt64].self { return try primitiveArray(&parser, codingPath, integer) as [UInt64] as! T }
+        if T.self == [Int32].self { return try primitiveArray(&parser, codingPath, integer) as [Int32] as! T }
+        if T.self == [UInt32].self { return try primitiveArray(&parser, codingPath, integer) as [UInt32] as! T }
+        if T.self == [Int16].self { return try primitiveArray(&parser, codingPath, integer) as [Int16] as! T }
+        if T.self == [UInt16].self { return try primitiveArray(&parser, codingPath, integer) as [UInt16] as! T }
+        if T.self == [Int8].self { return try primitiveArray(&parser, codingPath, integer) as [Int8] as! T }
+        if T.self == [UInt8].self { return try primitiveArray(&parser, codingPath, integer) as [UInt8] as! T }
+        if T.self == [UInt].self { return try primitiveArray(&parser, codingPath, integer) as [UInt] as! T }
         let path = codingPath()
         let impl = MessagePackDecoderImpl(
             context: context, offset: startOffset, codingPath: path)

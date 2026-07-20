@@ -74,9 +74,11 @@ Neither direction materializes a `MessagePackValue` tree:
 - Values of natively represented types (integers, strings, floats, bools,
   `Date`/`Data`/timestamps) flowing through the generic
   `encode<T>`/`decode<T>` funnels are coded directly, bypassing the
-  per-value `Encodable`/`Decodable` container machinery — `[Int]` and
-  `[String]` code at a handful of allocations total instead of one per
-  element.
+  per-value `Encodable`/`Decodable` container machinery. Arrays of those
+  scalar types (`[Int]`, `[String]`, `[Double]`, …) additionally bypass the
+  unkeyed-container machinery entirely: a tight loop reads or writes the
+  elements against the raw buffer, which puts them at macro-route speed —
+  including when they appear as fields of a decoded struct.
 - Hot paths avoid allocation: index coding keys build their `stringValue`
   lazily, coding paths are only materialized for errors and nested
   containers, decode primitives report failures via typed throws and attach
@@ -88,10 +90,10 @@ p50 wall clock, same machine as below, 1k-element array of a 6-field struct:
 
 | Workload | MessagePackEncoder/Decoder | Foundation JSONEncoder/Decoder |
 |---|---|---|
-| encode structs (1k) | 607 µs | 1.67 ms |
-| decode structs (1k) | 1.25 ms | 2.19 ms |
-| encode int array (10k) | 244 µs | — |
-| decode int array (10k) | 490 µs | — |
+| encode structs (1k) | 453 µs | 1.71 ms |
+| decode structs (1k) | 840 µs | 2.21 ms |
+| encode int array (10k) | 27 µs | — |
+| decode int array (10k) | 26 µs | — |
 
 ## Macro: `@MessagePackSerializable`
 
@@ -167,18 +169,18 @@ p50 wall clock, same fixtures as the Codable table:
 
 | Workload | macro | Codable (MessagePack) | serializer route | JSON |
 |---|---|---|---|---|
-| serialize structs (1k) | 42 µs | 607 µs | 1.07 ms | 1.67 ms |
-| deserialize structs (1k) | 226 µs | 1.25 ms | 1.06 ms | 2.19 ms |
-| round trip structs (1k) | 270 µs | 1.85 ms | — | — |
-| serialize int array (10k) | 28 µs | 244 µs | — | — |
-| deserialize int array (10k) | 23 µs | 490 µs | — | — |
+| serialize structs (1k) | 43 µs | 453 µs | 882 µs | 1.71 ms |
+| deserialize structs (1k) | 225 µs | 840 µs | 972 µs | 2.21 ms |
+| round trip structs (1k) | 270 µs | 1.30 ms | — | — |
+| serialize int array (10k) | 28 µs | 27 µs | — | — |
+| deserialize int array (10k) | 23 µs | 26 µs | — | — |
 
 ## Design notes
 
 - **Spec compliance**: All format families are supported (fixint, fixmap, fixarray, fixstr, nil, bool, bin 8/16/32, ext 8/16/32, float 32/64, uint/int 8–64, fixext 1–16, str 8/16/32, array 16/32, map 16/32). The reserved byte `0xc1` and invalid UTF-8 in strings are rejected. Timestamps round-trip through `.ext(type: -1, ...)`.
 - **Smallest representation**: As recommended by the spec, integers serialize with the smallest format that represents the value, regardless of the case width (`.int64(5)` encodes as a 1-byte positive fixint). Consequently, deserialization maps each wire format to the narrowest matching case (positive fixint → `.uint8`, negative fixint → `.int8`, `uint 16` → `.uint16`, …); use the `int64Value` / `uint64Value` accessors for width-agnostic reads.
-- **Iterative, not recursive**: Both directions use explicit frame stacks, so deeply nested input can never overflow the call stack. Deserialization enforces a nesting-depth limit (512) as DoS protection; serialization has no depth limit.
-- **Two-pass serialization**: An exact size pass followed by direct writes into a single exactly-sized buffer — no growth reallocations, and the result is handed to `Data` without copying.
+- **Iterative, not recursive**: Both directions use explicit frame stacks, so deeply nested input can never overflow the call stack. Deserialization enforces a nesting-depth limit (512) as DoS protection; serialization has no depth limit. The innermost container's state is kept in locals on both paths, so flat data never touches the stack arrays.
+- **Single-pass serialization**: One streaming pass into a growable buffer (doubling growth, so a large string/binary payload triggers at most one resize before its bulk copy), handed to `Data` without copying. Length limits (strings/binary/containers beyond 2^32-1) are still validated inline with typed throws.
 - **Zero-copy parsing**: The parser walks the raw bytes with unaligned big-endian loads; strings are built via `UTF8Span` (validate once, no revalidation) on OS 26+, falling back to `String(validating:)`. The availability check is resolved once per process, not per string.
 - **Hostile input**: Length claims are checked against remaining input before allocating, so truncated or malicious headers (e.g. "4 GB string follows") fail fast without large allocations.
 
@@ -195,15 +197,15 @@ Results on an Apple Silicon MacBook (arm64, Swift 6.4, release), p50 wall clock:
 
 | Workload | serialize | deserialize |
 |---|---|---|
-| small int array (64) | 750 ns | 625 ns |
-| large int array (10k) | 67 µs | 80 µs |
-| double array (10k) | 65 µs | 80 µs |
-| string array (1k) | 18 µs | 59 µs |
-| map (1k entries) | 54 µs | 70 µs |
-| nested objects (500) | 208 µs | 275 µs |
+| small int array (64) | 583 ns | 375 ns |
+| large int array (10k) | 56 µs | 46 µs |
+| double array (10k) | 48 µs | 45 µs |
+| string array (1k) | 19 µs | 52 µs |
+| map (1k entries) | 45 µs | 60 µs |
+| nested objects (500) | 160 µs | 239 µs |
 | binary 1 MB | 16 µs | 16 µs |
 
-Serialization performs 4 allocations total for flat payloads of any size (size-pass stack, write-pass stack, output buffer, `Data` wrapper); deserialization of scalar arrays performs 2.
+Deserialization of a flat scalar array performs 1 allocation (the result array); serialization performs the output buffer's growth chain plus the `Data` wrapper (about 9 allocations for a 10k-int array, independent of element count beyond the doubling).
 
 ## Testing
 

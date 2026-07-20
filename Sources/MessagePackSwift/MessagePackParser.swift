@@ -105,7 +105,16 @@ extension MessagePackSerializer {
         }
 
         mutating func parseValue() throws(MessagePackError) -> MessagePackValue {
+            // The innermost open container is kept in locals (`items`,
+            // `remaining`, `isMap`) instead of on the stack, so the
+            // per-element attach path below appends without going through an
+            // array subscript (and its exclusivity/uniqueness checks); outer
+            // containers are spilled to `stack` only when nesting.
             var stack: [Frame] = []
+            var items: [MessagePackValue] = []
+            var remaining = 0
+            var isMap = false
+            var depth = 0
 
             while true {
                 let format = try readFormatByte()
@@ -182,7 +191,7 @@ extension MessagePackSerializer {
                     if elementCount == 0 {
                         value = .array([])
                     } else {
-                        guard stack.count < MessagePackSerializer.maxDepth else {
+                        guard depth < MessagePackSerializer.maxDepth else {
                             throw MessagePackError.depthLimitExceeded
                         }
                         // Each element takes at least one byte, so cap the
@@ -191,9 +200,14 @@ extension MessagePackSerializer {
                         guard elementCount <= count - offset else {
                             throw MessagePackError.insufficientData
                         }
-                        var items = [MessagePackValue]()
+                        if depth > 0 {
+                            stack.append(Frame(items: items, remaining: remaining, isMap: isMap))
+                        }
+                        items = [MessagePackValue]()
                         items.reserveCapacity(elementCount)
-                        stack.append(Frame(items: items, remaining: elementCount, isMap: false))
+                        remaining = elementCount
+                        isMap = false
+                        depth += 1
                         continue
                     }
                 case 0x80...0x8f, 0xde, 0xdf:  // fixmap, map 16, map 32
@@ -206,16 +220,21 @@ extension MessagePackSerializer {
                     if entryCount == 0 {
                         value = .map([:])
                     } else {
-                        guard stack.count < MessagePackSerializer.maxDepth else {
+                        guard depth < MessagePackSerializer.maxDepth else {
                             throw MessagePackError.depthLimitExceeded
                         }
                         // Each entry takes at least two bytes (key + value).
                         guard entryCount <= (count - offset) / 2 else {
                             throw MessagePackError.insufficientData
                         }
-                        var items = [MessagePackValue]()
+                        if depth > 0 {
+                            stack.append(Frame(items: items, remaining: remaining, isMap: isMap))
+                        }
+                        items = [MessagePackValue]()
                         items.reserveCapacity(entryCount * 2)
-                        stack.append(Frame(items: items, remaining: entryCount * 2, isMap: true))
+                        remaining = entryCount * 2
+                        isMap = true
+                        depth += 1
                         continue
                     }
                 default:  // 0xc1 (never used)
@@ -225,23 +244,29 @@ extension MessagePackSerializer {
                 // Attach the completed value to the enclosing container(s),
                 // popping every frame this value completes.
                 while true {
-                    guard !stack.isEmpty else { return value }
-                    let top = stack.count - 1
-                    stack[top].items.append(value)
-                    stack[top].remaining -= 1
-                    guard stack[top].remaining == 0 else { break }
-                    let frame = stack.removeLast()
-                    if frame.isMap {
+                    guard depth > 0 else { return value }
+                    items.append(value)
+                    remaining -= 1
+                    guard remaining == 0 else { break }
+                    if isMap {
                         var entries = [MessagePackValue: MessagePackValue](
-                            minimumCapacity: frame.items.count / 2)
+                            minimumCapacity: items.count / 2)
                         var i = 0
-                        while i < frame.items.count {
-                            entries[frame.items[i]] = frame.items[i + 1]
+                        while i < items.count {
+                            entries[items[i]] = items[i + 1]
                             i += 2
                         }
                         value = .map(entries)
                     } else {
-                        value = .array(frame.items)
+                        value = .array(items)
+                    }
+                    depth -= 1
+                    if let frame = stack.popLast() {
+                        items = frame.items
+                        remaining = frame.remaining
+                        isMap = frame.isMap
+                    } else {
+                        items = []
                     }
                 }
             }

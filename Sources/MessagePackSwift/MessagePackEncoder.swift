@@ -298,6 +298,34 @@ final class MessagePackEncoderImpl {
             state.pointee.buffer.writeUInt(UInt64(value as! UInt8))
         } else if T.self == UInt.self {
             state.pointee.buffer.writeUInt(UInt64(value as! UInt))
+        } else if T.self == [Int].self {
+            encodePrimitiveArray(value as! [Int]) { $0.writeInt(Int64($1)) }
+        } else if T.self == [String].self {
+            encodePrimitiveArray(value as! [String]) { $0.writeString($1) }
+        } else if T.self == [Double].self {
+            encodePrimitiveArray(value as! [Double]) { $0.writeDouble($1) }
+        } else if T.self == [Bool].self {
+            encodePrimitiveArray(value as! [Bool]) { $0.writeBool($1) }
+        } else if T.self == [Float].self {
+            encodePrimitiveArray(value as! [Float]) { $0.writeFloat($1) }
+        } else if T.self == [Int64].self {
+            encodePrimitiveArray(value as! [Int64]) { $0.writeInt($1) }
+        } else if T.self == [UInt64].self {
+            encodePrimitiveArray(value as! [UInt64]) { $0.writeUInt($1) }
+        } else if T.self == [Int32].self {
+            encodePrimitiveArray(value as! [Int32]) { $0.writeInt(Int64($1)) }
+        } else if T.self == [UInt32].self {
+            encodePrimitiveArray(value as! [UInt32]) { $0.writeUInt(UInt64($1)) }
+        } else if T.self == [Int16].self {
+            encodePrimitiveArray(value as! [Int16]) { $0.writeInt(Int64($1)) }
+        } else if T.self == [UInt16].self {
+            encodePrimitiveArray(value as! [UInt16]) { $0.writeUInt(UInt64($1)) }
+        } else if T.self == [Int8].self {
+            encodePrimitiveArray(value as! [Int8]) { $0.writeInt(Int64($1)) }
+        } else if T.self == [UInt8].self {
+            encodePrimitiveArray(value as! [UInt8]) { $0.writeUInt(UInt64($1)) }
+        } else if T.self == [UInt].self {
+            encodePrimitiveArray(value as! [UInt]) { $0.writeUInt(UInt64($1)) }
         } else if T.self == Date.self {
             let date = value as! Date
             guard let timestamp = MessagePackTimestamp(exactly: date) else {
@@ -329,6 +357,20 @@ final class MessagePackEncoderImpl {
                         debugDescription: "Value of type \(T.self) did not encode any values"
                     ))
             }
+        }
+    }
+
+    /// Writes an array of a natively represented element type with a tight
+    /// loop, bypassing the unkeyed-container machinery. The count is known up
+    /// front, so the header is written at its final width directly — no
+    /// reserved header to compact in `finalize()`.
+    @inline(__always)
+    private func encodePrimitiveArray<E>(
+        _ array: [E], _ write: (inout MessagePackScratchBuffer, E) -> Void
+    ) {
+        state.pointee.buffer.writeArrayHeader(count: array.count)
+        for element in array {
+            write(&state.pointee.buffer, element)
         }
     }
 

@@ -25,7 +25,10 @@ public enum MessagePackValue: Sendable, Equatable, Hashable {
     case binary(Data)
     case array([MessagePackValue])
     case map([MessagePackValue: MessagePackValue])
-    case ext(type: Int8, data: Data)
+    /// Indirect so the enum's stride stays at 24 bytes (the 17-byte payload
+    /// would otherwise push every value to 32); ext values are rare enough
+    /// that the extra box is a good trade for smaller arrays everywhere.
+    indirect case ext(type: Int8, data: Data)
 }
 
 extension MessagePackValue {

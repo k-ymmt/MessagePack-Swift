@@ -285,6 +285,104 @@ extension MessagePackFormatSink {
         }
     }
 
+    /// Like ``writeValue(_:stack:)``, but validates string/binary/container
+    /// lengths against the MessagePack limits, throwing
+    /// ``MessagePackError/valueTooLarge`` instead of stopping with a
+    /// precondition failure.
+    @inline(__always)
+    mutating func writeValidatedValue(
+        _ value: MessagePackValue, stack: inout [MessagePackValueFrame]
+    ) throws(MessagePackError) {
+        switch value {
+        case .nil:
+            writeByte(0xc0)
+        case .bool(let v):
+            writeByte(v ? 0xc3 : 0xc2)
+        case .int8(let v):
+            writeInt(Int64(v))
+        case .int16(let v):
+            writeInt(Int64(v))
+        case .int32(let v):
+            writeInt(Int64(v))
+        case .int64(let v):
+            writeInt(v)
+        case .uint8(let v):
+            writeUInt(UInt64(v))
+        case .uint16(let v):
+            writeUInt(UInt64(v))
+        case .uint32(let v):
+            writeUInt(UInt64(v))
+        case .uint64(let v):
+            writeUInt(v)
+        case .float32(let v):
+            writeFloat(v)
+        case .float64(let v):
+            writeDouble(v)
+        case .string(let s):
+            guard s.utf8.count <= 0xffff_ffff else { throw MessagePackError.valueTooLarge }
+            writeString(s)
+        case .binary(let d):
+            guard d.count <= 0xffff_ffff else { throw MessagePackError.valueTooLarge }
+            writeBinary(d)
+        case .array(let elements):
+            guard elements.count <= 0xffff_ffff else { throw MessagePackError.valueTooLarge }
+            writeArrayHeader(count: elements.count)
+            if !elements.isEmpty { stack.append(MessagePackValueFrame(items: elements)) }
+        case .map(let entries):
+            guard entries.count <= 0xffff_ffff else { throw MessagePackError.valueTooLarge }
+            writeMapHeader(count: entries.count)
+            if !entries.isEmpty { stack.append(MessagePackValueFrame(map: entries)) }
+        case .ext(let type, let d):
+            guard d.count <= 0xffff_ffff else { throw MessagePackError.valueTooLarge }
+            writeExt(type: type, data: d)
+        }
+    }
+
+    /// Writes a whole value tree iteratively with length validation, throwing
+    /// ``MessagePackError/valueTooLarge`` for values beyond the MessagePack
+    /// limits. Iterative like ``write(_:)``, so hostile or extremely deep
+    /// trees cannot overflow the call stack.
+    mutating func writeValidated(_ root: MessagePackValue) throws(MessagePackError) {
+        var stack: [MessagePackValueFrame] = []
+        try writeValidatedValue(root, stack: &stack)
+        while !stack.isEmpty {
+            let top = stack.count - 1
+            if stack[top].isMap {
+                if let pending = stack[top].pending {
+                    stack[top].pending = nil
+                    try writeValidatedValue(pending, stack: &stack)
+                    continue
+                }
+                let index = stack[top].mapIndex
+                guard index != stack[top].map.endIndex else {
+                    stack.removeLast()
+                    continue
+                }
+                stack[top].mapIndex = stack[top].map.index(after: index)
+                let entry = stack[top].map[index]
+                stack[top].pending = entry.value
+                try writeValidatedValue(entry.key, stack: &stack)
+            } else {
+                // Emit consecutive children in a tight loop, breaking only
+                // when a child pushes a nested container frame.
+                let items = stack[top].items
+                let count = items.count
+                var index = stack[top].index
+                while index < count {
+                    let child = items[index]
+                    index += 1
+                    try writeValidatedValue(child, stack: &stack)
+                    if stack.count != top + 1 { break }
+                }
+                if index == count && stack.count == top + 1 {
+                    stack.removeLast()
+                } else {
+                    stack[top].index = index
+                }
+            }
+        }
+    }
+
     /// Writes a whole value tree iteratively (no recursion), so hostile or
     /// extremely deep trees cannot overflow the call stack.
     mutating func write(_ root: MessagePackValue) {
