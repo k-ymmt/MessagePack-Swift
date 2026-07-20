@@ -1,5 +1,6 @@
 .DS_Store
 /.build
+/Benchmarks/Comparison/.build
 /Packages
 xcuserdata/
 DerivedData/

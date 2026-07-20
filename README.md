@@ -209,16 +209,20 @@ Deserialization of a flat scalar array performs 1 allocation (the result array);
 
 ### Comparison with other MessagePack libraries
 
-The `ComparisonBenchmarks` target measures MessagePackSwift against
+`Benchmarks/Comparison` measures MessagePackSwift against
 [fumoboy007/msgpack-swift](https://github.com/fumoboy007/msgpack-swift),
 [a2/MessagePack.swift](https://github.com/a2/MessagePack.swift),
 [nnabeyang/swift-msgpack](https://github.com/nnabeyang/swift-msgpack), and
 [msgpack/msgpack-objectivec](https://github.com/msgpack/msgpack-objectivec)
-(vendored under `Benchmarks/ThirdParty` with minimal SPM/ARC patches — it has
-no upstream SwiftPM support):
+(vendored under `Benchmarks/Comparison/ThirdParty` with minimal SPM/ARC patches
+— it has no upstream SwiftPM support).
+
+It is a **separate package** that depends on this one by path, so the libraries
+it compares against never enter the dependency graph of MessagePackSwift's own
+consumers:
 
 ```sh
-swift package benchmark run --target ComparisonBenchmarks
+swift package --package-path Benchmarks/Comparison benchmark run
 ```
 
 Every library encodes its own natural representation of the same logical

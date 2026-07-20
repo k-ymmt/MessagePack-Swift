@@ -2,8 +2,8 @@
 
 Vendored copy of [msgpack/msgpack-objectivec](https://github.com/msgpack/msgpack-objectivec)
 at commit `03ae6049a627815170bbc42ebc8ba6452be563f9`, used only by the
-`ComparisonBenchmarks` target. The upstream repository has no SwiftPM manifest,
-so the sources are wrapped in an SPM Objective-C target here.
+`ComparisonBenchmarks` package. The upstream repository has no SwiftPM
+manifest, so the sources are wrapped in an SPM Objective-C target here.
 
 The bundled `msgpack_src` C implementation is from the original msgpack-c
 project (Copyright FURUHASHI Sadayuki, Apache License 2.0); license headers are
