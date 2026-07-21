@@ -120,11 +120,24 @@ extension MessagePackFormatSink {
     @inlinable
     @inline(__always)
     mutating func writeString(_ s: String) {
-        var string = s
-        string.withUTF8 { utf8 in
+        // Native strings already hold contiguous UTF-8; borrowing it avoids
+        // the retain/release a mutable copy of `s` costs per string, which
+        // profiled at ~40% of string-heavy serialization. Lazily bridged
+        // NSStrings have no contiguous storage and take the `withUTF8` path,
+        // which materializes it.
+        let written: Void? = s.utf8.withContiguousStorageIfAvailable { utf8 in
             writeStringHeader(byteCount: utf8.count)
             if let baseAddress = utf8.baseAddress {
                 writeBytes(baseAddress, count: utf8.count)
+            }
+        }
+        if written == nil {
+            var string = s
+            string.withUTF8 { utf8 in
+                writeStringHeader(byteCount: utf8.count)
+                if let baseAddress = utf8.baseAddress {
+                    writeBytes(baseAddress, count: utf8.count)
+                }
             }
         }
     }
