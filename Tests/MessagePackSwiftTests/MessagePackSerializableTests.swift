@@ -401,6 +401,37 @@ struct MessagePackSerializableRoundTripTests {
         try roundTrip(Box<[Int]>(value: Array(0..<70_000)))
     }
 
+    /// `Array.init(messagePack:)` builds counts 0...4 as literals and falls
+    /// back to an append loop above that, so every one of those branches
+    /// needs covering — with a non-trivial element type too, since those
+    /// take a different destroy path.
+    @Test func smallArrayCounts() throws {
+        for count in 0...8 {
+            try roundTrip(Box<[Int]>(value: Array(0..<count)))
+            try roundTrip(Box<[String]>(value: (0..<count).map { "tag\($0)" }))
+            try roundTrip(Box<[[Int]]>(value: (0..<count).map { Array(0...$0) }))
+            try roundTrip(Box<[String?]>(value: (0..<count).map { $0 % 2 == 0 ? "x" : nil }))
+        }
+    }
+
+    /// A truncated small array must still throw rather than yield a short
+    /// array: the literal branches read a fixed number of elements.
+    @Test func truncatedSmallArrayThrows() throws {
+        for count in 1...5 {
+            // fixmap(1) { "value": fixarray(count) [ uint16 x (count-1), 0xcd ] }
+            // uint16 elements keep the byte count above the array header's
+            // cheap "one byte per element" guard, so the failure happens
+            // inside the element loop, not when reading the header.
+            let complete = Array(repeating: [0xcd, 0x00, 0x01] as [UInt8], count: count - 1)
+            let bytes: [UInt8] =
+                [0x81, 0xa5] + Array("value".utf8)
+                + [0x90 | UInt8(count)] + complete.flatMap { $0 } + [0xcd]
+            #expect(throws: MessagePackError.insufficientData) {
+                try MessagePackSerializer.deserialize(Box<[Int]>.self, from: Data(bytes))
+            }
+        }
+    }
+
     @Test func wideStructUsesMap16() throws {
         let wide = Wide(base: 100)
         let data = MessagePackSerializer.serialize(wide)
