@@ -23,13 +23,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select latest Xcode
+      # The package needs Swift 6.4, which no released Xcode ships yet; install
+      # the latest main development snapshot toolchain from swift.org.
+      - name: Install Swift development snapshot
+        working-directory: ${{ runner.temp }}
         run: |
-          latest=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -n 1)
-          if [ -n "$latest" ]; then
-            sudo xcode-select -s "$latest"
-          fi
-          swift --version
+          json=$(curl -sS https://www.swift.org/api/v1/install/dev/main/macos.json)
+          dir=$(echo "$json" | jq -r '.universal[0].dir')
+          pkg=$(echo "$json" | jq -r '.universal[0].download')
+          echo "Installing $dir"
+          curl -sSLO "https://download.swift.org/development/xcode/$dir/$pkg"
+          sudo installer -pkg "$pkg" -target /
+          id=$(plutil -extract CFBundleIdentifier raw "/Library/Developer/Toolchains/$dir.xctoolchain/Info.plist")
+          echo "TOOLCHAINS=$id" >> "$GITHUB_ENV"
+
+      - name: Show Swift version
+        run: swift --version
 
       - name: Install jemalloc
         run: brew install jemalloc
