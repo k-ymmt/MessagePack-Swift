@@ -3,7 +3,7 @@ import Benchmark
 import Foundation
 import MessagePack  // fumoboy007/msgpack-swift (product DMMessagePack)
 import MPMessagePack  // gabriel/MPMessagePack
-import MessagePackSwift
+import MessagePack
 import SwiftMsgpack  // nnabeyang/swift-msgpack
 
 // Cross-library comparison on shared logical fixtures. Every library encodes
@@ -12,7 +12,7 @@ import SwiftMsgpack  // nnabeyang/swift-msgpack
 // value, and decoding a foreign payload would measure those choices rather
 // than the library under test.
 
-// MARK: - Codable fixtures (MessagePackSwift / DMMessagePack / SwiftMsgpack)
+// MARK: - Codable fixtures (MessagePack-Swift / DMMessagePack / SwiftMsgpack)
 
 private struct Person: Codable {
     var id: Int
@@ -58,9 +58,9 @@ private let macroPeople = (0..<1_000).map {
 private let intValues = (0..<10_000).map { $0 * 31 - 5_000 }
 private let stringValues = (0..<1_000).map { "string value number \($0) with some padding" }
 
-// MARK: - Value-tree fixtures (MessagePackSwift serializer / A2MessagePack)
+// MARK: - Value-tree fixtures (MessagePack-Swift serializer / A2MessagePack)
 
-private let ourPeopleTree = MessagePackSwift.MessagePackValue.array(
+private let ourPeopleTree = MessagePack.MessagePackValue.array(
     people.map { person in
         .map([
             .string("id"): .int64(Int64(person.id)),
@@ -72,11 +72,11 @@ private let ourPeopleTree = MessagePackSwift.MessagePackValue.array(
         ])
     })
 
-private let ourIntTree = MessagePackSwift.MessagePackValue.array(
+private let ourIntTree = MessagePack.MessagePackValue.array(
     intValues.map { .int64(Int64($0)) }
 )
 
-private let ourStringTree = MessagePackSwift.MessagePackValue.array(
+private let ourStringTree = MessagePack.MessagePackValue.array(
     stringValues.map { .string($0) }
 )
 
@@ -118,9 +118,9 @@ private let mpStrings = stringValues as NSArray
 
 // MARK: - Pre-encoded payloads for the decode benchmarks (own format each)
 
-private let ourCodablePeopleData = try! MessagePackSwift.MessagePackEncoder().encode(people)
-private let ourCodableIntData = try! MessagePackSwift.MessagePackEncoder().encode(intValues)
-private let ourCodableStringData = try! MessagePackSwift.MessagePackEncoder().encode(stringValues)
+private let ourCodablePeopleData = try! MessagePack.MessagePackEncoder().encode(people)
+private let ourCodableIntData = try! MessagePack.MessagePackEncoder().encode(intValues)
+private let ourCodableStringData = try! MessagePack.MessagePackEncoder().encode(stringValues)
 private let ourMacroPeopleData = MessagePackSerializer.serialize(macroPeople)
 private let ourTreePeopleData = try! MessagePackSerializer.serialize(value: ourPeopleTree)
 private let ourTreeIntData = try! MessagePackSerializer.serialize(value: ourIntTree)
@@ -158,20 +158,20 @@ let benchmarks: @Sendable () -> Void = {
 
     // MARK: structs (1k Person records)
 
-    Benchmark("structs encode: MessagePackSwift (Codable)") { benchmark in
-        let encoder = MessagePackSwift.MessagePackEncoder()
+    Benchmark("structs encode: MessagePack-Swift (Codable)") { benchmark in
+        let encoder = MessagePack.MessagePackEncoder()
         for _ in benchmark.scaledIterations {
             blackHole(try encoder.encode(people))
         }
     }
 
-    Benchmark("structs encode: MessagePackSwift (macro)") { benchmark in
+    Benchmark("structs encode: MessagePack-Swift (macro)") { benchmark in
         for _ in benchmark.scaledIterations {
             blackHole(MessagePackSerializer.serialize(macroPeople))
         }
     }
 
-    Benchmark("structs encode: MessagePackSwift (value tree)") { benchmark in
+    Benchmark("structs encode: MessagePack-Swift (value tree)") { benchmark in
         for _ in benchmark.scaledIterations {
             blackHole(try MessagePackSerializer.serialize(value: ourPeopleTree))
         }
@@ -203,20 +203,20 @@ let benchmarks: @Sendable () -> Void = {
         }
     }
 
-    Benchmark("structs decode: MessagePackSwift (Codable)") { benchmark in
-        let decoder = MessagePackSwift.MessagePackDecoder()
+    Benchmark("structs decode: MessagePack-Swift (Codable)") { benchmark in
+        let decoder = MessagePack.MessagePackDecoder()
         for _ in benchmark.scaledIterations {
             blackHole(try decoder.decode([Person].self, from: ourCodablePeopleData))
         }
     }
 
-    Benchmark("structs decode: MessagePackSwift (macro)") { benchmark in
+    Benchmark("structs decode: MessagePack-Swift (macro)") { benchmark in
         for _ in benchmark.scaledIterations {
             blackHole(try MessagePackSerializer.deserialize([MacroPerson].self, from: ourMacroPeopleData))
         }
     }
 
-    Benchmark("structs decode: MessagePackSwift (value tree)") { benchmark in
+    Benchmark("structs decode: MessagePack-Swift (value tree)") { benchmark in
         for _ in benchmark.scaledIterations {
             blackHole(try MessagePackSerializer.deserialize(data: ourTreePeopleData))
         }
@@ -250,20 +250,20 @@ let benchmarks: @Sendable () -> Void = {
 
     // MARK: int array (10k)
 
-    Benchmark("int array encode: MessagePackSwift (Codable)") { benchmark in
-        let encoder = MessagePackSwift.MessagePackEncoder()
+    Benchmark("int array encode: MessagePack-Swift (Codable)") { benchmark in
+        let encoder = MessagePack.MessagePackEncoder()
         for _ in benchmark.scaledIterations {
             blackHole(try encoder.encode(intValues))
         }
     }
 
-    Benchmark("int array encode: MessagePackSwift (macro)") { benchmark in
+    Benchmark("int array encode: MessagePack-Swift (macro)") { benchmark in
         for _ in benchmark.scaledIterations {
             blackHole(MessagePackSerializer.serialize(intValues))
         }
     }
 
-    Benchmark("int array encode: MessagePackSwift (value tree)") { benchmark in
+    Benchmark("int array encode: MessagePack-Swift (value tree)") { benchmark in
         for _ in benchmark.scaledIterations {
             blackHole(try MessagePackSerializer.serialize(value: ourIntTree))
         }
@@ -295,20 +295,20 @@ let benchmarks: @Sendable () -> Void = {
         }
     }
 
-    Benchmark("int array decode: MessagePackSwift (Codable)") { benchmark in
-        let decoder = MessagePackSwift.MessagePackDecoder()
+    Benchmark("int array decode: MessagePack-Swift (Codable)") { benchmark in
+        let decoder = MessagePack.MessagePackDecoder()
         for _ in benchmark.scaledIterations {
             blackHole(try decoder.decode([Int].self, from: ourCodableIntData))
         }
     }
 
-    Benchmark("int array decode: MessagePackSwift (macro)") { benchmark in
+    Benchmark("int array decode: MessagePack-Swift (macro)") { benchmark in
         for _ in benchmark.scaledIterations {
             blackHole(try MessagePackSerializer.deserialize([Int].self, from: ourCodableIntData))
         }
     }
 
-    Benchmark("int array decode: MessagePackSwift (value tree)") { benchmark in
+    Benchmark("int array decode: MessagePack-Swift (value tree)") { benchmark in
         for _ in benchmark.scaledIterations {
             blackHole(try MessagePackSerializer.deserialize(data: ourTreeIntData))
         }
@@ -342,20 +342,20 @@ let benchmarks: @Sendable () -> Void = {
 
     // MARK: string array (1k)
 
-    Benchmark("string array encode: MessagePackSwift (Codable)") { benchmark in
-        let encoder = MessagePackSwift.MessagePackEncoder()
+    Benchmark("string array encode: MessagePack-Swift (Codable)") { benchmark in
+        let encoder = MessagePack.MessagePackEncoder()
         for _ in benchmark.scaledIterations {
             blackHole(try encoder.encode(stringValues))
         }
     }
 
-    Benchmark("string array encode: MessagePackSwift (macro)") { benchmark in
+    Benchmark("string array encode: MessagePack-Swift (macro)") { benchmark in
         for _ in benchmark.scaledIterations {
             blackHole(MessagePackSerializer.serialize(stringValues))
         }
     }
 
-    Benchmark("string array encode: MessagePackSwift (value tree)") { benchmark in
+    Benchmark("string array encode: MessagePack-Swift (value tree)") { benchmark in
         for _ in benchmark.scaledIterations {
             blackHole(try MessagePackSerializer.serialize(value: ourStringTree))
         }
@@ -387,20 +387,20 @@ let benchmarks: @Sendable () -> Void = {
         }
     }
 
-    Benchmark("string array decode: MessagePackSwift (Codable)") { benchmark in
-        let decoder = MessagePackSwift.MessagePackDecoder()
+    Benchmark("string array decode: MessagePack-Swift (Codable)") { benchmark in
+        let decoder = MessagePack.MessagePackDecoder()
         for _ in benchmark.scaledIterations {
             blackHole(try decoder.decode([String].self, from: ourCodableStringData))
         }
     }
 
-    Benchmark("string array decode: MessagePackSwift (macro)") { benchmark in
+    Benchmark("string array decode: MessagePack-Swift (macro)") { benchmark in
         for _ in benchmark.scaledIterations {
             blackHole(try MessagePackSerializer.deserialize([String].self, from: ourCodableStringData))
         }
     }
 
-    Benchmark("string array decode: MessagePackSwift (value tree)") { benchmark in
+    Benchmark("string array decode: MessagePack-Swift (value tree)") { benchmark in
         for _ in benchmark.scaledIterations {
             blackHole(try MessagePackSerializer.deserialize(data: ourTreeStringData))
         }

@@ -2,7 +2,7 @@ import SwiftCompilerPlugin
 import SwiftSyntaxMacros
 
 @main
-struct MessagePackSwiftMacrosPlugin: CompilerPlugin {
+struct MessagePackMacrosPlugin: CompilerPlugin {
     let providingMacros: [Macro.Type] = [
         MessagePackSerializableMacro.self,
         MessagePackIgnoredMacro.self,

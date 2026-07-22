@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import MessagePackSwift
+@testable import MessagePack
 
 /// A decoder-side type that retries with a wider type when a narrow decode
 /// fails — the fallback pattern that must not desync the unkeyed cursor.

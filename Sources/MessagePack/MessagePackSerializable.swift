@@ -51,18 +51,18 @@ public protocol MessagePackSerializable {
 ///   be assigned), matching `Codable` synthesis.
 @attached(extension, conformances: MessagePackSerializable, names: named(serialize), named(init))
 public macro MessagePackSerializable() =
-    #externalMacro(module: "MessagePackSwiftMacros", type: "MessagePackSerializableMacro")
+    #externalMacro(module: "MessagePackMacros", type: "MessagePackSerializableMacro")
 
 /// Excludes a stored property from `@MessagePackSerializable` serialization.
 @attached(peer)
 public macro MessagePackIgnored() =
-    #externalMacro(module: "MessagePackSwiftMacros", type: "MessagePackIgnoredMacro")
+    #externalMacro(module: "MessagePackMacros", type: "MessagePackIgnoredMacro")
 
 /// Overrides the map key `@MessagePackSerializable` uses for a stored
 /// property.
 @attached(peer)
 public macro MessagePackKey(_ key: StaticString) =
-    #externalMacro(module: "MessagePackSwiftMacros", type: "MessagePackKeyMacro")
+    #externalMacro(module: "MessagePackMacros", type: "MessagePackKeyMacro")
 
 // MARK: - Serializer entry points
 

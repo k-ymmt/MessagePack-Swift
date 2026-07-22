@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import MessagePackSwift
+@testable import MessagePack
 
 /// API-misuse cases that JSONEncoder also handles by trapping; verified via
 /// exit tests so the traps themselves are covered.
