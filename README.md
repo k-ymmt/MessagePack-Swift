@@ -2,6 +2,43 @@
 
 A high-performance [MessagePack](https://github.com/msgpack/msgpack/blob/master/spec.md) serializer/deserializer for Swift.
 
+## Comparison with other MessagePack libraries
+
+`Benchmarks/Comparison` measures MessagePack-Swift against
+[fumoboy007/msgpack-swift](https://github.com/fumoboy007/msgpack-swift),
+[a2/MessagePack.swift](https://github.com/a2/MessagePack.swift),
+[nnabeyang/swift-msgpack](https://github.com/nnabeyang/swift-msgpack), and
+[gabriel/MPMessagePack](https://github.com/gabriel/MPMessagePack).
+
+It is a **separate package** that depends on this one by path, so the libraries
+it compares against never enter the dependency graph of MessagePack-Swift's own
+consumers:
+
+```sh
+swift package --package-path Benchmarks/Comparison benchmark run
+```
+
+Each library encodes its own natural representation of the same logical
+fixtures and decodes bytes it produced itself — libraries differ in which
+formats they emit for a given value, so decoding a foreign payload would
+measure those choices rather than the library under test. Codable-based routes
+decode into typed structs; the "value tree" routes produce a MessagePack value
+enum; MPMessagePack produces Foundation `NSArray`/`NSDictionary` objects.
+Results from a GitHub Actions `macos-26` arm64 runner (3-core Apple Silicon
+VM, Swift 6.5 development snapshot 2026-07-11, release build), produced by the
+[ComparisonBenchmarks workflow](.github/workflows/comparison-benchmarks.yml),
+p50 wall clock:
+
+| Library (route) | structs (1k) encode / decode | int array (10k) encode / decode | string array (1k) encode / decode |
+|---|---|---|---|
+| **MessagePack-Swift (macro)** | **58 µs / 352 µs** | **38 µs** / 38 µs | **14 µs** / 80 µs |
+| MessagePack-Swift (Codable) | 731 µs / 1.46 ms | 40 µs / **35 µs** | 21 µs / 85 µs |
+| MessagePack-Swift (value tree) | 1.01 ms / 1.18 ms | 73 µs / 59 µs | 24 µs / 88 µs |
+| fumoboy007/msgpack-swift (Codable) | 744 µs / 1.51 ms | 39 µs / 40 µs | 21 µs / **79 µs** |
+| a2/MessagePack.swift (value tree) | 5.71 ms / 2.99 ms | 2.25 ms / 450 µs | 471 µs / 300 µs |
+| gabriel/MPMessagePack (Foundation) | 3.04 ms / 4.16 ms | 2.37 ms / 1.20 ms | 154 µs / 545 µs |
+| nnabeyang/swift-msgpack (Codable) | 11 ms / 7.29 ms | 10 ms / 7.68 ms | 945 µs / 919 µs |
+
 ## Usage
 
 ```swift
@@ -88,7 +125,8 @@ let deserialized: Foo = try MessagePackSerializer.deserialize(Foo.self, from: se
   (`throws(MessagePackError)`) and validates length claims against the
   remaining input before allocating.
 
-p50 wall clock, same machine as below, 1k-element array of a 6-field struct:
+p50 wall clock, same machine as the comparison table above, 1k-element
+array of a 6-field struct:
 
 | Workload | macro | Codable (MessagePack) | serializer route | JSON |
 |---|---|---|---|---|
@@ -193,8 +231,9 @@ brew install jemalloc   # once
 swift package --allow-writing-to-package-directory benchmark
 ```
 
-Results from a GitHub Actions `macos-26` arm64 runner (3-core Apple Silicon
-VM, Swift 6.5 development snapshot 2026-07-11, release build), produced by the
+Same runner and metric as the
+[comparison table](#comparison-with-other-messagepack-libraries) at the top,
+produced by the
 [MessagePackBenchmarks workflow](.github/workflows/messagepack-benchmarks.yml),
 p50 wall clock:
 
@@ -209,42 +248,6 @@ p50 wall clock:
 | binary 1 MB | 27 µs | 21 µs |
 
 Deserialization of a flat scalar array performs 1 allocation (the result array); serialization performs the output buffer's growth chain plus the `Data` wrapper (about 9 allocations for a 10k-int array, independent of element count beyond the doubling).
-
-### Comparison with other MessagePack libraries
-
-`Benchmarks/Comparison` measures MessagePack-Swift against
-[fumoboy007/msgpack-swift](https://github.com/fumoboy007/msgpack-swift),
-[a2/MessagePack.swift](https://github.com/a2/MessagePack.swift),
-[nnabeyang/swift-msgpack](https://github.com/nnabeyang/swift-msgpack), and
-[gabriel/MPMessagePack](https://github.com/gabriel/MPMessagePack).
-
-It is a **separate package** that depends on this one by path, so the libraries
-it compares against never enter the dependency graph of MessagePack-Swift's own
-consumers:
-
-```sh
-swift package --package-path Benchmarks/Comparison benchmark run
-```
-
-Each library encodes its own natural representation of the same logical
-fixtures and decodes bytes it produced itself — libraries differ in which
-formats they emit for a given value, so decoding a foreign payload would
-measure those choices rather than the library under test. Codable-based routes
-decode into typed structs; the "value tree" routes produce a MessagePack value
-enum; MPMessagePack produces Foundation `NSArray`/`NSDictionary` objects. Same
-machine and metric as above, produced by the
-[ComparisonBenchmarks workflow](.github/workflows/comparison-benchmarks.yml),
-p50 wall clock:
-
-| Library (route) | structs (1k) encode / decode | int array (10k) encode / decode | string array (1k) encode / decode |
-|---|---|---|---|
-| **MessagePack-Swift (macro)** | **58 µs / 352 µs** | **38 µs** / 38 µs | **14 µs** / 80 µs |
-| MessagePack-Swift (Codable) | 731 µs / 1.46 ms | 40 µs / **35 µs** | 21 µs / 85 µs |
-| MessagePack-Swift (value tree) | 1.01 ms / 1.18 ms | 73 µs / 59 µs | 24 µs / 88 µs |
-| fumoboy007/msgpack-swift (Codable) | 744 µs / 1.51 ms | 39 µs / 40 µs | 21 µs / **79 µs** |
-| a2/MessagePack.swift (value tree) | 5.71 ms / 2.99 ms | 2.25 ms / 450 µs | 471 µs / 300 µs |
-| gabriel/MPMessagePack (Foundation) | 3.04 ms / 4.16 ms | 2.37 ms / 1.20 ms | 154 µs / 545 µs |
-| nnabeyang/swift-msgpack (Codable) | 11 ms / 7.29 ms | 10 ms / 7.68 ms | 945 µs / 919 µs |
 
 ## Testing
 
