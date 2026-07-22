@@ -1,0 +1,68 @@
+name: ComparisonBenchmarks
+
+on:
+  workflow_dispatch:
+    inputs:
+      filter:
+        description: "Regexp filter for benchmarks to run (passed to --filter)"
+        required: false
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: Benchmarks/Comparison
+
+jobs:
+  benchmark:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select latest Xcode
+        run: |
+          latest=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -n 1)
+          if [ -n "$latest" ]; then
+            sudo xcode-select -s "$latest"
+          fi
+          swift --version
+
+      - name: Install jemalloc
+        run: brew install jemalloc
+
+      - name: Cache SwiftPM build
+        uses: actions/cache@v4
+        with:
+          path: |
+            Benchmarks/Comparison/.build
+            ~/Library/Caches/org.swift.swiftpm
+          key: comparison-benchmarks-${{ runner.os }}-${{ hashFiles('Package.swift', 'Benchmarks/Comparison/Package.swift') }}
+          restore-keys: |
+            comparison-benchmarks-${{ runner.os }}-
+
+      - name: Run benchmarks
+        env:
+          FILTER: ${{ inputs.filter }}
+        run: |
+          args=()
+          if [ -n "$FILTER" ]; then
+            args+=(--filter "$FILTER")
+          fi
+          swift package --allow-writing-to-package-directory benchmark \
+            baseline update ci --no-progress "${args[@]}"
+
+      - name: Publish results to job summary
+        run: |
+          swift package --allow-writing-to-package-directory benchmark \
+            baseline read ci --format markdown --no-progress \
+            | awk '/^## /{found=1} found' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: comparison-benchmarks-baseline
+          path: Benchmarks/Comparison/.benchmarkBaselines/
