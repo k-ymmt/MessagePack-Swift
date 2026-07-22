@@ -1,7 +1,7 @@
 import A2MessagePack
 import Benchmark
 import Foundation
-import MessagePack  // fumoboy007/msgpack-swift (product DMMessagePack)
+import DMMessagePackCore  // fumoboy007/msgpack-swift (module aliased from its MessagePack)
 import MPMessagePack  // gabriel/MPMessagePack
 import MessagePack
 import SwiftMsgpack  // nnabeyang/swift-msgpack
@@ -126,9 +126,9 @@ private let ourTreePeopleData = try! MessagePackSerializer.serialize(value: ourP
 private let ourTreeIntData = try! MessagePackSerializer.serialize(value: ourIntTree)
 private let ourTreeStringData = try! MessagePackSerializer.serialize(value: ourStringTree)
 
-private let dmPeopleData = try! MessagePack.MessagePackEncoder().encode(people)
-private let dmIntData = try! MessagePack.MessagePackEncoder().encode(intValues)
-private let dmStringData = try! MessagePack.MessagePackEncoder().encode(stringValues)
+private let dmPeopleData = try! DMMessagePackCore.MessagePackEncoder().encode(people)
+private let dmIntData = try! DMMessagePackCore.MessagePackEncoder().encode(intValues)
+private let dmStringData = try! DMMessagePackCore.MessagePackEncoder().encode(stringValues)
 
 private let nnPeopleData = try! MsgPackEncoder().encode(people)
 private let nnIntData = try! MsgPackEncoder().encode(intValues)
@@ -178,7 +178,7 @@ let benchmarks: @Sendable () -> Void = {
     }
 
     Benchmark("structs encode: fumoboy007/msgpack-swift") { benchmark in
-        let encoder = MessagePack.MessagePackEncoder()
+        let encoder = DMMessagePackCore.MessagePackEncoder()
         for _ in benchmark.scaledIterations {
             blackHole(try encoder.encode(people))
         }
@@ -223,7 +223,7 @@ let benchmarks: @Sendable () -> Void = {
     }
 
     Benchmark("structs decode: fumoboy007/msgpack-swift") { benchmark in
-        let decoder = MessagePack.MessagePackDecoder()
+        let decoder = DMMessagePackCore.MessagePackDecoder()
         for _ in benchmark.scaledIterations {
             blackHole(try decoder.decode([Person].self, from: dmPeopleData))
         }
@@ -270,7 +270,7 @@ let benchmarks: @Sendable () -> Void = {
     }
 
     Benchmark("int array encode: fumoboy007/msgpack-swift") { benchmark in
-        let encoder = MessagePack.MessagePackEncoder()
+        let encoder = DMMessagePackCore.MessagePackEncoder()
         for _ in benchmark.scaledIterations {
             blackHole(try encoder.encode(intValues))
         }
@@ -315,7 +315,7 @@ let benchmarks: @Sendable () -> Void = {
     }
 
     Benchmark("int array decode: fumoboy007/msgpack-swift") { benchmark in
-        let decoder = MessagePack.MessagePackDecoder()
+        let decoder = DMMessagePackCore.MessagePackDecoder()
         for _ in benchmark.scaledIterations {
             blackHole(try decoder.decode([Int].self, from: dmIntData))
         }
@@ -362,7 +362,7 @@ let benchmarks: @Sendable () -> Void = {
     }
 
     Benchmark("string array encode: fumoboy007/msgpack-swift") { benchmark in
-        let encoder = MessagePack.MessagePackEncoder()
+        let encoder = DMMessagePackCore.MessagePackEncoder()
         for _ in benchmark.scaledIterations {
             blackHole(try encoder.encode(stringValues))
         }
@@ -407,7 +407,7 @@ let benchmarks: @Sendable () -> Void = {
     }
 
     Benchmark("string array decode: fumoboy007/msgpack-swift") { benchmark in
-        let decoder = MessagePack.MessagePackDecoder()
+        let decoder = DMMessagePackCore.MessagePackDecoder()
         for _ in benchmark.scaledIterations {
             blackHole(try decoder.decode([String].self, from: dmStringData))
         }
