@@ -92,11 +92,11 @@ p50 wall clock, same machine as below, 1k-element array of a 6-field struct:
 
 | Workload | macro | Codable (MessagePack) | serializer route | JSON |
 |---|---|---|---|---|
-| serialize structs (1k) | 43 µs | 453 µs | 882 µs | 1.71 ms |
-| deserialize structs (1k) | 225 µs | 840 µs | 972 µs | 2.21 ms |
-| round trip structs (1k) | 270 µs | 1.30 ms | — | — |
-| serialize int array (10k) | 28 µs | 27 µs | — | — |
-| deserialize int array (10k) | 23 µs | 26 µs | — | — |
+| serialize structs (1k) | 55 µs | 651 µs | 1.52 ms | 3.08 ms |
+| deserialize structs (1k) | 326 µs | 1.31 ms | 1.36 ms | 3.28 ms |
+| round trip structs (1k) | 371 µs | 1.96 ms | — | — |
+| serialize int array (10k) | 37 µs | 35 µs | — | — |
+| deserialize int array (10k) | 33 µs | 34 µs | — | — |
 
 ## Codable
 
@@ -170,10 +170,10 @@ p50 wall clock, same fixtures as the macro table:
 
 | Workload | MessagePackEncoder/Decoder | Foundation JSONEncoder/Decoder |
 |---|---|---|
-| encode structs (1k) | 453 µs | 1.71 ms |
-| decode structs (1k) | 840 µs | 2.21 ms |
-| encode int array (10k) | 27 µs | — |
-| decode int array (10k) | 26 µs | — |
+| encode structs (1k) | 651 µs | 3.08 ms |
+| decode structs (1k) | 1.31 ms | 3.28 ms |
+| encode int array (10k) | 35 µs | — |
+| decode int array (10k) | 34 µs | — |
 
 ## Design notes
 
@@ -193,17 +193,20 @@ brew install jemalloc   # once
 swift package --allow-writing-to-package-directory benchmark
 ```
 
-Results on an Apple Silicon MacBook (arm64, Swift 6.4, release), p50 wall clock:
+Results from a GitHub Actions `macos-26` arm64 runner (3-core Apple Silicon
+VM, Swift 6.5 development snapshot 2026-07-11, release build), produced by the
+[MessagePackBenchmarks workflow](.github/workflows/messagepack-benchmarks.yml),
+p50 wall clock:
 
 | Workload | serialize | deserialize |
 |---|---|---|
-| small int array (64) | 583 ns | 375 ns |
-| large int array (10k) | 56 µs | 46 µs |
-| double array (10k) | 48 µs | 45 µs |
-| string array (1k) | 19 µs | 52 µs |
-| map (1k entries) | 45 µs | 60 µs |
-| nested objects (500) | 160 µs | 239 µs |
-| binary 1 MB | 16 µs | 16 µs |
+| small int array (64) | 875 ns | 542 ns |
+| large int array (10k) | 71 µs | 58 µs |
+| double array (10k) | 64 µs | 58 µs |
+| string array (1k) | 24 µs | 80 µs |
+| map (1k entries) | 105 µs | 76 µs |
+| nested objects (500) | 325 µs | 336 µs |
+| binary 1 MB | 27 µs | 21 µs |
 
 Deserialization of a flat scalar array performs 1 allocation (the result array); serialization performs the output buffer's growth chain plus the `Data` wrapper (about 9 allocations for a 10k-int array, independent of element count beyond the doubling).
 
@@ -229,17 +232,19 @@ formats they emit for a given value, so decoding a foreign payload would
 measure those choices rather than the library under test. Codable-based routes
 decode into typed structs; the "value tree" routes produce a MessagePack value
 enum; MPMessagePack produces Foundation `NSArray`/`NSDictionary` objects. Same
-machine and metric as above, p50 wall clock:
+machine and metric as above, produced by the
+[ComparisonBenchmarks workflow](.github/workflows/comparison-benchmarks.yml),
+p50 wall clock:
 
 | Library (route) | structs (1k) encode / decode | int array (10k) encode / decode | string array (1k) encode / decode |
 |---|---|---|---|
-| **MessagePack-Swift (macro)** | **43 µs / 227 µs** | 28 µs / **23 µs** | **11 µs** / 53 µs |
-| MessagePack-Swift (Codable) | 465 µs / 840 µs | **27 µs** / 25 µs | 16 µs / 55 µs |
-| MessagePack-Swift (value tree) | 470 µs / 822 µs | 55 µs / 48 µs | 19 µs / **52 µs** |
-| fumoboy007/msgpack-swift (Codable) | 1.14 ms / 1.94 ms | 68 µs / 239 µs | 13 µs / 84 µs |
-| a2/MessagePack.swift (value tree) | 2.09 ms / 1.69 ms | 994 µs / 285 µs | 160 µs / 167 µs |
-| gabriel/MPMessagePack (Foundation) | 1.54 ms / 2.68 ms | 1.13 ms / 799 µs | 77 µs / 307 µs |
-| nnabeyang/swift-msgpack (Codable) | 5.92 ms / 4.47 ms | 5.97 ms / 4.36 ms | 619 µs / 565 µs |
+| **MessagePack-Swift (macro)** | **58 µs / 352 µs** | **38 µs** / 38 µs | **14 µs** / 80 µs |
+| MessagePack-Swift (Codable) | 731 µs / 1.46 ms | 40 µs / **35 µs** | 21 µs / 85 µs |
+| MessagePack-Swift (value tree) | 1.01 ms / 1.18 ms | 73 µs / 59 µs | 24 µs / 88 µs |
+| fumoboy007/msgpack-swift (Codable) | 744 µs / 1.51 ms | 39 µs / 40 µs | 21 µs / **79 µs** |
+| a2/MessagePack.swift (value tree) | 5.71 ms / 2.99 ms | 2.25 ms / 450 µs | 471 µs / 300 µs |
+| gabriel/MPMessagePack (Foundation) | 3.04 ms / 4.16 ms | 2.37 ms / 1.20 ms | 154 µs / 545 µs |
+| nnabeyang/swift-msgpack (Codable) | 11 ms / 7.29 ms | 10 ms / 7.68 ms | 945 µs / 919 µs |
 
 ## Testing
 
