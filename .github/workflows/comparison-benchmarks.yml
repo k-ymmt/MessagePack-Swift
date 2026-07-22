@@ -75,3 +75,4 @@ jobs:
         with:
           name: comparison-benchmarks-baseline
           path: Benchmarks/Comparison/.benchmarkBaselines/
+          include-hidden-files: true

@@ -71,3 +71,4 @@ jobs:
         with:
           name: messagepack-benchmarks-baseline
           path: .benchmarkBaselines/
+          include-hidden-files: true
