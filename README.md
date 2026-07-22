@@ -2,6 +2,27 @@
 
 A high-performance [MessagePack](https://github.com/msgpack/msgpack/blob/master/spec.md) serializer/deserializer for Swift.
 
+## Usage
+
+```swift
+import MessagePack
+
+@MessagePackSerializable
+struct Person {
+    let id: Int
+    let name: String
+    let tags: [String]
+}
+
+let person = Person(id: 1, name: "Alice", tags: ["a"])
+let data: Data = MessagePackSerializer.serialize(person)
+let decoded = try MessagePackSerializer.deserialize(Person.self, from: data)
+```
+
+`serialize` is non-throwing and `deserialize` uses typed throws
+(`throws(MessagePackError)`); the macro section below has the details and the
+other routes (`Codable`, value tree).
+
 ## Comparison with other MessagePack libraries
 
 `Benchmarks/Comparison` measures MessagePack-Swift against
@@ -38,22 +59,6 @@ p50 wall clock:
 | a2/MessagePack.swift (value tree) | 5.71 ms / 2.99 ms | 2.25 ms / 450 µs | 471 µs / 300 µs |
 | gabriel/MPMessagePack (Foundation) | 3.04 ms / 4.16 ms | 2.37 ms / 1.20 ms | 154 µs / 545 µs |
 | nnabeyang/swift-msgpack (Codable) | 11 ms / 7.29 ms | 10 ms / 7.68 ms | 945 µs / 919 µs |
-
-## Usage
-
-```swift
-import MessagePack
-
-let value = MessagePackValue.map([
-    .string("name"): .string("MessagePack-Swift"),
-    .string("version"): .array([.uint8(1), .uint8(0), .uint8(0)]),
-])
-
-let data = try MessagePackSerializer.serialize(value: value)
-let decoded = try MessagePackSerializer.deserialize(data: data)
-```
-
-Both APIs use typed throws (`throws(MessagePackError)`).
 
 ## Macro: `@MessagePackSerializable`
 
@@ -232,7 +237,7 @@ swift package --allow-writing-to-package-directory benchmark
 ```
 
 Same runner and metric as the
-[comparison table](#comparison-with-other-messagepack-libraries) at the top,
+[comparison table](#comparison-with-other-messagepack-libraries) above,
 produced by the
 [MessagePackBenchmarks workflow](.github/workflows/messagepack-benchmarks.yml),
 p50 wall clock:
