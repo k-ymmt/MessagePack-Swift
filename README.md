@@ -18,83 +18,6 @@ let decoded = try MessagePackSerializer.deserialize(data: data)
 
 Both APIs use typed throws (`throws(MessagePackError)`).
 
-## Codable
-
-`MessagePackEncoder` / `MessagePackDecoder` mirror `JSONEncoder` / `JSONDecoder`:
-
-```swift
-struct Person: Codable {
-    var id: Int
-    var name: String
-    var tags: [String]
-}
-
-let data = try MessagePackEncoder().encode(Person(id: 1, name: "Alice", tags: ["a"]))
-let person = try MessagePackDecoder().decode(Person.self, from: data)
-```
-
-- Keyed containers become maps with string keys; maps with integer wire keys
-  can be decoded through `CodingKey.intValue`.
-- `Date` ↔ the spec's timestamp extension (ext type -1; numeric seconds are
-  also accepted when decoding), `Data` ↔ bin 8/16/32, and
-  `MessagePackTimestamp` ↔ ext type -1. Dates that cannot be represented as
-  a timestamp (non-finite, out of `Int64` seconds range) throw
-  `EncodingError.invalidValue`.
-- Integers encode with the smallest wire format and decode from any integer
-  format that fits the requested type; out-of-range numbers (including
-  float64 → `Float` overflow) throw instead of truncating.
-- Encoder output is byte-identical to `MessagePackSerializer.serialize` of
-  the equivalent value tree (smallest headers everywhere).
-- Both coders are `Sendable` (unchecked, value-semantic — like
-  `JSONEncoder`, values placed in `userInfo` must be `Sendable` for
-  cross-task use).
-- Codable edge cases behave like `JSONEncoder`/`JSONDecoder`: repeated
-  `container(keyedBy:)` requests merge into one map, a `superEncoder()`
-  that is never used contributes nothing (its entry is written lazily on
-  first use), `superDecoder()` for a missing key decodes as nil, and a
-  value that encodes nothing throws. Because encoding is streaming, writes
-  must be well nested — out-of-order writes to an already-closed container
-  trap with a precondition failure instead of corrupting output. Decoding
-  enforces a nesting-depth limit (128) against hostile input driving
-  recursive `Decodable` types.
-
-### Codable performance
-
-Neither direction materializes a `MessagePackValue` tree:
-
-- **Encoding** streams bytes into a growable buffer in a single pass.
-  Container headers (counts unknown up front) are reserved at full width,
-  counts are accumulated in the reserved bytes themselves, and headers are
-  compacted to the smallest format in one final pass.
-- **Decoding** walks the raw bytes directly. A keyed container scans its
-  entries' byte offsets once and matches coding keys by comparing UTF-8
-  bytes in place (no key `String` allocations), starting each lookup at the
-  previous match so keys requested in wire order cost O(1). Container scans
-  are memoized so a decoded value is never skipped twice.
-- Values of natively represented types (integers, strings, floats, bools,
-  `Date`/`Data`/timestamps) flowing through the generic
-  `encode<T>`/`decode<T>` funnels are coded directly, bypassing the
-  per-value `Encodable`/`Decodable` container machinery. Arrays of those
-  scalar types (`[Int]`, `[String]`, `[Double]`, …) additionally bypass the
-  unkeyed-container machinery entirely: a tight loop reads or writes the
-  elements against the raw buffer, which puts them at macro-route speed —
-  including when they appear as fields of a decoded struct.
-- Hot paths avoid allocation: index coding keys build their `stringValue`
-  lazily, coding paths are only materialized for errors and nested
-  containers, decode primitives report failures via typed throws and attach
-  coding-path context only when an error actually propagates, and the
-  encoder's buffer sits behind a pointer to bypass dynamic exclusivity
-  checks.
-
-p50 wall clock, same machine as below, 1k-element array of a 6-field struct:
-
-| Workload | MessagePackEncoder/Decoder | Foundation JSONEncoder/Decoder |
-|---|---|---|
-| encode structs (1k) | 453 µs | 1.71 ms |
-| decode structs (1k) | 840 µs | 2.21 ms |
-| encode int array (10k) | 27 µs | — |
-| decode int array (10k) | 26 µs | — |
-
 ## Macro: `@MessagePackSerializable`
 
 The fastest route. The macro generates a `MessagePackSerializable` conformance
@@ -165,7 +88,7 @@ let deserialized: Foo = try MessagePackSerializer.deserialize(Foo.self, from: se
   (`throws(MessagePackError)`) and validates length claims against the
   remaining input before allocating.
 
-p50 wall clock, same fixtures as the Codable table:
+p50 wall clock, same machine as below, 1k-element array of a 6-field struct:
 
 | Workload | macro | Codable (MessagePack) | serializer route | JSON |
 |---|---|---|---|---|
@@ -174,6 +97,83 @@ p50 wall clock, same fixtures as the Codable table:
 | round trip structs (1k) | 270 µs | 1.30 ms | — | — |
 | serialize int array (10k) | 28 µs | 27 µs | — | — |
 | deserialize int array (10k) | 23 µs | 26 µs | — | — |
+
+## Codable
+
+`MessagePackEncoder` / `MessagePackDecoder` mirror `JSONEncoder` / `JSONDecoder`:
+
+```swift
+struct Person: Codable {
+    var id: Int
+    var name: String
+    var tags: [String]
+}
+
+let data = try MessagePackEncoder().encode(Person(id: 1, name: "Alice", tags: ["a"]))
+let person = try MessagePackDecoder().decode(Person.self, from: data)
+```
+
+- Keyed containers become maps with string keys; maps with integer wire keys
+  can be decoded through `CodingKey.intValue`.
+- `Date` ↔ the spec's timestamp extension (ext type -1; numeric seconds are
+  also accepted when decoding), `Data` ↔ bin 8/16/32, and
+  `MessagePackTimestamp` ↔ ext type -1. Dates that cannot be represented as
+  a timestamp (non-finite, out of `Int64` seconds range) throw
+  `EncodingError.invalidValue`.
+- Integers encode with the smallest wire format and decode from any integer
+  format that fits the requested type; out-of-range numbers (including
+  float64 → `Float` overflow) throw instead of truncating.
+- Encoder output is byte-identical to `MessagePackSerializer.serialize` of
+  the equivalent value tree (smallest headers everywhere).
+- Both coders are `Sendable` (unchecked, value-semantic — like
+  `JSONEncoder`, values placed in `userInfo` must be `Sendable` for
+  cross-task use).
+- Codable edge cases behave like `JSONEncoder`/`JSONDecoder`: repeated
+  `container(keyedBy:)` requests merge into one map, a `superEncoder()`
+  that is never used contributes nothing (its entry is written lazily on
+  first use), `superDecoder()` for a missing key decodes as nil, and a
+  value that encodes nothing throws. Because encoding is streaming, writes
+  must be well nested — out-of-order writes to an already-closed container
+  trap with a precondition failure instead of corrupting output. Decoding
+  enforces a nesting-depth limit (128) against hostile input driving
+  recursive `Decodable` types.
+
+### Codable performance
+
+Neither direction materializes a `MessagePackValue` tree:
+
+- **Encoding** streams bytes into a growable buffer in a single pass.
+  Container headers (counts unknown up front) are reserved at full width,
+  counts are accumulated in the reserved bytes themselves, and headers are
+  compacted to the smallest format in one final pass.
+- **Decoding** walks the raw bytes directly. A keyed container scans its
+  entries' byte offsets once and matches coding keys by comparing UTF-8
+  bytes in place (no key `String` allocations), starting each lookup at the
+  previous match so keys requested in wire order cost O(1). Container scans
+  are memoized so a decoded value is never skipped twice.
+- Values of natively represented types (integers, strings, floats, bools,
+  `Date`/`Data`/timestamps) flowing through the generic
+  `encode<T>`/`decode<T>` funnels are coded directly, bypassing the
+  per-value `Encodable`/`Decodable` container machinery. Arrays of those
+  scalar types (`[Int]`, `[String]`, `[Double]`, …) additionally bypass the
+  unkeyed-container machinery entirely: a tight loop reads or writes the
+  elements against the raw buffer, which puts them at macro-route speed —
+  including when they appear as fields of a decoded struct.
+- Hot paths avoid allocation: index coding keys build their `stringValue`
+  lazily, coding paths are only materialized for errors and nested
+  containers, decode primitives report failures via typed throws and attach
+  coding-path context only when an error actually propagates, and the
+  encoder's buffer sits behind a pointer to bypass dynamic exclusivity
+  checks.
+
+p50 wall clock, same fixtures as the macro table:
+
+| Workload | MessagePackEncoder/Decoder | Foundation JSONEncoder/Decoder |
+|---|---|---|
+| encode structs (1k) | 453 µs | 1.71 ms |
+| decode structs (1k) | 840 µs | 2.21 ms |
+| encode int array (10k) | 27 µs | — |
+| decode int array (10k) | 26 µs | — |
 
 ## Design notes
 
