@@ -52,13 +52,13 @@ p50 wall clock:
 
 | Library (route) | structs (1k) encode / decode | int array (10k) encode / decode | string array (1k) encode / decode |
 |---|---|---|---|
-| **MessagePack-Swift (macro)** | **58 µs / 352 µs** | **38 µs** / 38 µs | **14 µs** / 80 µs |
-| MessagePack-Swift (Codable) | 731 µs / 1.46 ms | 40 µs / **35 µs** | 21 µs / 85 µs |
-| MessagePack-Swift (value tree) | 1.01 ms / 1.18 ms | 73 µs / 59 µs | 24 µs / 88 µs |
-| fumoboy007/msgpack-swift (Codable) | 744 µs / 1.51 ms | 39 µs / 40 µs | 21 µs / **79 µs** |
-| a2/MessagePack.swift (value tree) | 5.71 ms / 2.99 ms | 2.25 ms / 450 µs | 471 µs / 300 µs |
-| gabriel/MPMessagePack (Foundation) | 3.04 ms / 4.16 ms | 2.37 ms / 1.20 ms | 154 µs / 545 µs |
-| nnabeyang/swift-msgpack (Codable) | 11 ms / 7.29 ms | 10 ms / 7.68 ms | 945 µs / 919 µs |
+| **MessagePack-Swift (macro)** | **57 µs / 350 µs** | **38 µs** / **33 µs** | **15 µs** / **81 µs** |
+| MessagePack-Swift (Codable) | 734 µs / 1.48 ms | **38 µs** / 34 µs | 21 µs / **81 µs** |
+| MessagePack-Swift (value tree) | 976 µs / 1.18 ms | 80 µs / 58 µs | 24 µs / 94 µs |
+| fumoboy007/msgpack-swift (Codable) | 1.80 ms / 3.79 ms | 94 µs / 438 µs | 16 µs / 139 µs |
+| a2/MessagePack.swift (value tree) | 5.68 ms / 2.92 ms | 2.33 ms / 432 µs | 503 µs / 304 µs |
+| gabriel/MPMessagePack (Foundation) | 3.10 ms / 4.43 ms | 2.08 ms / 1.09 ms | 164 µs / 517 µs |
+| nnabeyang/swift-msgpack (Codable) | 10 ms / 7.43 ms | 8.87 ms / 7.27 ms | 1.04 ms / 890 µs |
 
 ## Macro: `@MessagePackSerializable`
 
