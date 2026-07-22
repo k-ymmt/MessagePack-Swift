@@ -1,14 +1,14 @@
-# MessagePackSwift
+# MessagePack-Swift
 
 A high-performance [MessagePack](https://github.com/msgpack/msgpack/blob/master/spec.md) serializer/deserializer for Swift.
 
 ## Usage
 
 ```swift
-import MessagePackSwift
+import MessagePack
 
 let value = MessagePackValue.map([
-    .string("name"): .string("MessagePackSwift"),
+    .string("name"): .string("MessagePack-Swift"),
     .string("version"): .array([.uint8(1), .uint8(0), .uint8(0)]),
 ])
 
@@ -209,14 +209,14 @@ Deserialization of a flat scalar array performs 1 allocation (the result array);
 
 ### Comparison with other MessagePack libraries
 
-`Benchmarks/Comparison` measures MessagePackSwift against
+`Benchmarks/Comparison` measures MessagePack-Swift against
 [fumoboy007/msgpack-swift](https://github.com/fumoboy007/msgpack-swift),
 [a2/MessagePack.swift](https://github.com/a2/MessagePack.swift),
 [nnabeyang/swift-msgpack](https://github.com/nnabeyang/swift-msgpack), and
 [gabriel/MPMessagePack](https://github.com/gabriel/MPMessagePack).
 
 It is a **separate package** that depends on this one by path, so the libraries
-it compares against never enter the dependency graph of MessagePackSwift's own
+it compares against never enter the dependency graph of MessagePack-Swift's own
 consumers:
 
 ```sh
@@ -233,9 +233,9 @@ machine and metric as above, p50 wall clock:
 
 | Library (route) | structs (1k) encode / decode | int array (10k) encode / decode | string array (1k) encode / decode |
 |---|---|---|---|
-| **MessagePackSwift (macro)** | **43 µs / 227 µs** | 28 µs / **23 µs** | **11 µs** / 53 µs |
-| MessagePackSwift (Codable) | 465 µs / 840 µs | **27 µs** / 25 µs | 16 µs / 55 µs |
-| MessagePackSwift (value tree) | 470 µs / 822 µs | 55 µs / 48 µs | 19 µs / **52 µs** |
+| **MessagePack-Swift (macro)** | **43 µs / 227 µs** | 28 µs / **23 µs** | **11 µs** / 53 µs |
+| MessagePack-Swift (Codable) | 465 µs / 840 µs | **27 µs** / 25 µs | 16 µs / 55 µs |
+| MessagePack-Swift (value tree) | 470 µs / 822 µs | 55 µs / 48 µs | 19 µs / **52 µs** |
 | fumoboy007/msgpack-swift (Codable) | 1.14 ms / 1.94 ms | 68 µs / 239 µs | 13 µs / 84 µs |
 | a2/MessagePack.swift (value tree) | 2.09 ms / 1.69 ms | 994 µs / 285 µs | 160 µs / 167 µs |
 | gabriel/MPMessagePack (Foundation) | 1.54 ms / 2.68 ms | 1.13 ms / 799 µs | 77 µs / 307 µs |

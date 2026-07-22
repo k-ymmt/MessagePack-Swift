@@ -63,7 +63,7 @@ enum MessagePackMacroDiagnostic: DiagnosticMessage {
         case .keyOnMultipleBindings: id = "keyOnMultipleBindings"
         case .ignoredPropertyNeedsDefault: id = "ignoredPropertyNeedsDefault"
         }
-        return MessageID(domain: "MessagePackSwiftMacros", id: id)
+        return MessageID(domain: "MessagePackMacros", id: id)
     }
 
     var severity: DiagnosticSeverity { .error }
@@ -155,7 +155,7 @@ public struct MessagePackSerializableMacro: ExtensionMacro {
         }
 
         let access = accessModifier(of: structDecl)
-        let conformanceClause = protocols.isEmpty ? "" : ": MessagePackSwift.MessagePackSerializable"
+        let conformanceClause = protocols.isEmpty ? "" : ": MessagePack.MessagePackSerializable"
         let whereClause = genericWhereClause(of: structDecl, fields: fields)
 
         let extensionSource = """
@@ -172,7 +172,7 @@ public struct MessagePackSerializableMacro: ExtensionMacro {
 
     private static func serializeMethod(fields: [Field], access: String) -> String {
         var lines: [String] = []
-        lines.append("\(access)func serialize(into writer: inout MessagePackSwift.MessagePackWriter) {")
+        lines.append("\(access)func serialize(into writer: inout MessagePack.MessagePackWriter) {")
         // The map header and every key are known at expansion time, so they
         // are emitted as precomputed wire bytes: the header merges with the
         // first key, and each run is written 8 bytes per store.
@@ -260,7 +260,7 @@ public struct MessagePackSerializableMacro: ExtensionMacro {
         let decodable = fields.filter(\.isDecodable)
         var lines: [String] = []
         lines.append(
-            "\(access)init(messagePack reader: inout MessagePackSwift.MessagePackReader) throws(MessagePackSwift.MessagePackError) {"
+            "\(access)init(messagePack reader: inout MessagePack.MessagePackReader) throws(MessagePack.MessagePackError) {"
         )
         if decodable.isEmpty {
             lines.append("    let _msgpackEntryCount = try reader.readMapHeader()")
@@ -301,7 +301,7 @@ public struct MessagePackSerializableMacro: ExtensionMacro {
                     lines.append("        self.`\(field.name)` = value")
                     lines.append("    } else {")
                     lines.append(
-                        "        throw MessagePackSwift.MessagePackError.missingField(\(literal(field.key)))"
+                        "        throw MessagePack.MessagePackError.missingField(\(literal(field.key)))"
                     )
                     lines.append("    }")
                 }
@@ -361,7 +361,7 @@ public struct MessagePackSerializableMacro: ExtensionMacro {
                 let take = min(8, length - position)
                 let value = chunkValue(entry.bytes, offset: position, count: take)
                 conditions.append(
-                    "MessagePackSwift.MessagePackReader.keyChunk(_msgpackKey, offset: \(position), count: \(take)) == \(hexLiteral(value))"
+                    "MessagePack.MessagePackReader.keyChunk(_msgpackKey, offset: \(position), count: \(take)) == \(hexLiteral(value))"
                 )
                 position += take
             }
@@ -379,7 +379,7 @@ public struct MessagePackSerializableMacro: ExtensionMacro {
         let take = min(8, length - offset)
         let groups = Dictionary(grouping: entries) { chunkValue($0.bytes, offset: offset, count: take) }
         var lines = [
-            "switch MessagePackSwift.MessagePackReader.keyChunk(_msgpackKey, offset: \(offset), count: \(take)) {"
+            "switch MessagePack.MessagePackReader.keyChunk(_msgpackKey, offset: \(offset), count: \(take)) {"
         ]
         for value in groups.keys.sorted() {
             let group = groups[value]!
@@ -474,7 +474,7 @@ public struct MessagePackSerializableMacro: ExtensionMacro {
         let constrained = parameters
             .map(\.name.text)
             .filter { used.contains($0) }
-            .map { "\($0): MessagePackSwift.MessagePackSerializable" }
+            .map { "\($0): MessagePack.MessagePackSerializable" }
         guard !constrained.isEmpty else { return "" }
         return " where " + constrained.joined(separator: ", ")
     }
@@ -523,9 +523,9 @@ public struct MessagePackSerializableMacro: ExtensionMacro {
             for element in varDecl.attributes {
                 guard let attribute = element.as(AttributeSyntax.self) else { continue }
                 switch attribute.attributeName.trimmedDescription {
-                case "MessagePackIgnored", "MessagePackSwift.MessagePackIgnored":
+                case "MessagePackIgnored", "MessagePack.MessagePackIgnored":
                     ignored = true
-                case "MessagePackKey", "MessagePackSwift.MessagePackKey":
+                case "MessagePackKey", "MessagePack.MessagePackKey":
                     // representedLiteralValue resolves escape sequences and is
                     // nil for interpolated (non-static) literals.
                     guard case .argumentList(let arguments) = attribute.arguments,

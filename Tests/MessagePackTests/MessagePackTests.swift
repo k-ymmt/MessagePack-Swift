@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import MessagePackSwift
+@testable import MessagePack
 
 private func serializedBytes(_ value: MessagePackValue) throws -> [UInt8] {
     [UInt8](try MessagePackSerializer.serialize(value: value))
@@ -412,7 +412,7 @@ struct AccessorTests {
 struct RoundTripTests {
     @Test func complexDocument() throws {
         let value = MessagePackValue.map([
-            .string("name"): .string("MessagePackSwift"),
+            .string("name"): .string("MessagePack"),
             .string("version"): .array([.uint8(1), .uint8(0), .uint8(0)]),
             .string("tags"): .array([.string("swift"), .string("serialization")]),
             .string("count"): .uint32(70000),

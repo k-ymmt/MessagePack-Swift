@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import MessagePackSwift
+@testable import MessagePack
 
 private func roundTrip<T: MessagePackSerializable & Equatable>(
     _ value: T, sourceLocation: SourceLocation = #_sourceLocation

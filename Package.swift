@@ -4,7 +4,7 @@ import CompilerPluginSupport
 import PackageDescription
 
 let package = Package(
-    name: "MessagePackSwift",
+    name: "MessagePack-Swift",
     platforms: [
         .macOS(.v15),
         .iOS(.v18),
@@ -14,8 +14,8 @@ let package = Package(
     ],
     products: [
         .library(
-            name: "MessagePackSwift",
-            targets: ["MessagePackSwift"]
+            name: "MessagePack",
+            targets: ["MessagePack"]
         ),
     ],
     dependencies: [
@@ -24,30 +24,30 @@ let package = Package(
     ],
     targets: [
         .macro(
-            name: "MessagePackSwiftMacros",
+            name: "MessagePackMacros",
             dependencies: [
                 .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
                 .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
             ]
         ),
         .target(
-            name: "MessagePackSwift",
-            dependencies: ["MessagePackSwiftMacros"],
+            name: "MessagePack",
+            dependencies: ["MessagePackMacros"],
             swiftSettings: [
                 .enableUpcomingFeature("ApproachableConcurrency"),
             ],
         ),
         .testTarget(
-            name: "MessagePackSwiftTests",
-            dependencies: ["MessagePackSwift"],
+            name: "MessagePackTests",
+            dependencies: ["MessagePack"],
             swiftSettings: [
                 .enableUpcomingFeature("ApproachableConcurrency"),
             ],
         ),
         .testTarget(
-            name: "MessagePackSwiftMacrosTests",
+            name: "MessagePackMacrosTests",
             dependencies: [
-                "MessagePackSwiftMacros",
+                "MessagePackMacros",
                 .product(name: "SwiftSyntaxMacrosTestSupport", package: "swift-syntax"),
             ]
         ),
@@ -55,7 +55,7 @@ let package = Package(
             name: "MessagePackBenchmarks",
             dependencies: [
                 .product(name: "Benchmark", package: "benchmark"),
-                "MessagePackSwift",
+                "MessagePack",
             ],
             path: "Benchmarks/MessagePackBenchmarks",
             plugins: [

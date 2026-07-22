@@ -1,6 +1,6 @@
 import Benchmark
 import Foundation
-import MessagePackSwift
+import MessagePack
 
 // MARK: - Fixtures
 

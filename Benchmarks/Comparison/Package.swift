@@ -3,7 +3,7 @@
 import PackageDescription
 
 // Standalone package so that the third-party MessagePack implementations we
-// benchmark against never enter the dependency graph of MessagePackSwift's
+// benchmark against never enter the dependency graph of MessagePack-Swift's
 // own consumers. Run from this directory:
 //
 //     swift package benchmark run
@@ -11,7 +11,7 @@ import PackageDescription
 let package = Package(
     name: "ComparisonBenchmarks",
     // Benchmarks only ever run on the host, and some of the libraries compared
-    // against declare narrower platform support than MessagePackSwift does.
+    // against declare narrower platform support than MessagePack-Swift does.
     platforms: [
         .macOS(.v15),
     ],
@@ -28,9 +28,15 @@ let package = Package(
             name: "ComparisonBenchmarks",
             dependencies: [
                 .product(name: "Benchmark", package: "benchmark"),
-                .product(name: "MessagePackSwift", package: "MessagePackSwift"),
+                .product(name: "MessagePack", package: "MessagePack-Swift"),
                 .product(name: "MPMessagePack", package: "MPMessagePack"),
-                .product(name: "DMMessagePack", package: "msgpack-swift"),
+                .product(
+                    name: "DMMessagePack",
+                    package: "msgpack-swift",
+                    // msgpack-swift has an internal target also named
+                    // MessagePack; alias it away from our MessagePack module.
+                    moduleAliases: ["MessagePack": "DMMessagePackCore"]
+                ),
                 .product(
                     name: "MessagePack",
                     package: "MessagePack.swift",

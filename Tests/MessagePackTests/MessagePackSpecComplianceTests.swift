@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import MessagePackSwift
+@testable import MessagePack
 
 private func serializedBytes(_ value: MessagePackValue) throws -> [UInt8] {
     [UInt8](try MessagePackSerializer.serialize(value: value))
