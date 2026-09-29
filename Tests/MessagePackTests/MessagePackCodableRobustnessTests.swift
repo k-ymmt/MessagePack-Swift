@@ -243,4 +243,21 @@ struct CodableRobustnessTests {
             ]))
         #expect(try MessagePackDecoder().decode(Sparse.self, from: reversed) == value)
     }
+
+    // Skipping an unknown key rejects an array32 count the remaining input
+    // cannot hold, instead of overflowing the count of pending values.
+    @Test func keyedScanRejectsImpossibleNestedArray32Counts() {
+        struct Probe: Decodable {
+            var known: Int?
+        }
+
+        let bytes: [UInt8] = [
+            0x81, 0xa1, 0x78,  // { "x":
+            0xdd, 0x7f, 0xff, 0xff, 0xff,  // array32(Int32.max)
+            0xdd, 0x7f, 0xff, 0xff, 0xff,  // nested array32(Int32.max)
+        ]
+        #expect(throws: DecodingError.self) {
+            try MessagePackDecoder().decode(Probe.self, from: Data(bytes))
+        }
+    }
 }

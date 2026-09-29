@@ -4,12 +4,13 @@ import Foundation
 @usableFromInline
 enum MessagePackLimits {
     /// The longest str/bin/ext payload, array, or map the format can express
-    /// (2^32-1), since every 32-bit header stores its length in a `UInt32`.
+    /// (2^32-1), since every 32-bit header stores its length in a `UInt32`,
+    /// capped to the addressable collection size on 32-bit platforms.
     ///
     /// A computed property rather than a `static let`: it folds to an
     /// immediate at every use site, with no lazy global initialization.
     @inlinable
-    static var maxLength: Int { 0xffff_ffff }
+    static var maxLength: Int { Int(clamping: UInt32.max) }
 }
 
 /// A low-level byte sink that MessagePack format emission is generic over.

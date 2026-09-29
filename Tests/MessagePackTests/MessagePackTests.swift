@@ -347,12 +347,24 @@ struct ErrorTests {
             [0x81, 0x01],  // map with missing value
             [0xd6, 0xff, 0x00],  // fixext4 truncated
             [0xdc, 0xff, 0xff],  // array16 claims 65535 elements, no data
+            [0xc6, 0xff, 0xff, 0xff, 0xff],  // bin32 claims 4GB
             [0xdb, 0xff, 0xff, 0xff, 0xff],  // str32 claims 4GB
+            [0xc9, 0xff, 0xff, 0xff, 0xff],  // ext32 claims 4GB
+            [0xdd, 0xff, 0xff, 0xff, 0xff],  // array32 claims 2^32 - 1 elements
+            [0xdf, 0xff, 0xff, 0xff, 0xff],  // map32 claims 2^32 - 1 entries
         ]
         for bytes in truncated {
             #expect(throws: MessagePackError.insufficientData) {
                 try deserialize(bytes)
             }
+        }
+    }
+
+    @Test func uint32LengthMustFitPlatformInteger() throws {
+        #expect(
+            try messagePackLengthExactly(UInt32(Int32.max), as: Int32.self) == Int32.max)
+        #expect(throws: MessagePackError.insufficientData) {
+            try messagePackLengthExactly(UInt32.max, as: Int32.self)
         }
     }
 

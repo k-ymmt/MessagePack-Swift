@@ -7,6 +7,10 @@ import Foundation
 /// the `#available` scope: checking `#available` on every call costs a
 /// `__isPlatformVersionAtLeast` runtime call, which profiled at ~10% of
 /// struct-decode time.
+///
+/// watchOS 10 lacks `String(validating:)`, so there the bytes are decoded
+/// with repair and compared back. Foundation's `String(bytes:encoding:)` is
+/// not a substitute: it drops a leading BOM.
 @usableFromInline
 let messagePackMakeString: @Sendable (UnsafeBufferPointer<UInt8>) -> String? = {
     if #available(macOS 26.0, iOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, *) {
@@ -14,10 +18,30 @@ let messagePackMakeString: @Sendable (UnsafeBufferPointer<UInt8>) -> String? = {
             guard let span = try? UTF8Span(validating: bytes.span) else { return nil }
             return String(copying: span)
         }
-    } else {
+    } else if #available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *) {
         return { bytes in String(validating: bytes, as: UTF8.self) }
+    } else {
+        return { bytes in
+            let string = String(decoding: bytes, as: UTF8.self)
+            return string.utf8.elementsEqual(bytes) ? string : nil
+        }
     }
 }()
+
+/// Converts a 32-bit length header to `T`. A length `T` cannot hold (only
+/// possible where `Int` is 32 bits) could never be backed by the input, so it
+/// throws ``MessagePackError/insufficientData``. Generic over `T` so tests
+/// can check the 32-bit case on a 64-bit host.
+@usableFromInline
+@inline(__always)
+func messagePackLengthExactly<T: FixedWidthInteger>(
+    _ value: UInt32, as _: T.Type
+) throws(MessagePackError) -> T {
+    guard let result = T(exactly: value) else {
+        throw MessagePackError.insufficientData
+    }
+    return result
+}
 
 extension MessagePackSerializer {
     /// An iterative (non-recursive) parser over a raw byte buffer.
@@ -71,6 +95,12 @@ extension MessagePackSerializer {
             let value = base.loadUnaligned(fromByteOffset: offset, as: T.self).bigEndian
             offset += size
             return value
+        }
+
+        @inlinable
+        @inline(__always)
+        mutating func readLength32() throws(MessagePackError) -> Int {
+            try messagePackLengthExactly(try readBigEndian(UInt32.self), as: Int.self)
         }
 
         @inlinable
@@ -138,13 +168,13 @@ extension MessagePackSerializer {
                 case 0xc5:  // bin 16
                     value = .binary(try readData(length: Int(try readBigEndian(UInt16.self))))
                 case 0xc6:  // bin 32
-                    value = .binary(try readData(length: Int(try readBigEndian(UInt32.self))))
+                    value = .binary(try readData(length: readLength32()))
                 case 0xc7:  // ext 8
                     value = try readExt(length: Int(try readBigEndian(UInt8.self)))
                 case 0xc8:  // ext 16
                     value = try readExt(length: Int(try readBigEndian(UInt16.self)))
                 case 0xc9:  // ext 32
-                    value = try readExt(length: Int(try readBigEndian(UInt32.self)))
+                    value = try readExt(length: readLength32())
                 case 0xca:  // float 32
                     value = .float32(Float(bitPattern: try readBigEndian(UInt32.self)))
                 case 0xcb:  // float 64
@@ -180,12 +210,12 @@ extension MessagePackSerializer {
                 case 0xda:  // str 16
                     value = .string(try readString(length: Int(try readBigEndian(UInt16.self))))
                 case 0xdb:  // str 32
-                    value = .string(try readString(length: Int(try readBigEndian(UInt32.self))))
+                    value = .string(try readString(length: readLength32()))
                 case 0x90...0x9f, 0xdc, 0xdd:  // fixarray, array 16, array 32
                     let elementCount: Int
                     switch format {
                     case 0xdc: elementCount = Int(try readBigEndian(UInt16.self))
-                    case 0xdd: elementCount = Int(try readBigEndian(UInt32.self))
+                    case 0xdd: elementCount = try readLength32()
                     default: elementCount = Int(format & 0x0f)
                     }
                     if elementCount == 0 {
@@ -214,7 +244,7 @@ extension MessagePackSerializer {
                     let entryCount: Int
                     switch format {
                     case 0xde: entryCount = Int(try readBigEndian(UInt16.self))
-                    case 0xdf: entryCount = Int(try readBigEndian(UInt32.self))
+                    case 0xdf: entryCount = try readLength32()
                     default: entryCount = Int(format & 0x0f)
                     }
                     if entryCount == 0 {
@@ -382,7 +412,7 @@ extension MessagePackSerializer.Parser {
         case 0xda:
             return try readString(length: Int(try readBigEndian(UInt16.self)))
         case 0xdb:
-            return try readString(length: Int(try readBigEndian(UInt32.self)))
+            return try readString(length: readLength32())
         default:
             offset = start
             return nil
@@ -406,7 +436,7 @@ extension MessagePackSerializer.Parser {
         case 0xda:
             length = Int(try readBigEndian(UInt16.self))
         case 0xdb:
-            length = Int(try readBigEndian(UInt32.self))
+            length = try readLength32()
         default:
             offset = start
             return nil
@@ -431,7 +461,7 @@ extension MessagePackSerializer.Parser {
         case 0xc5:
             return try readData(length: Int(try readBigEndian(UInt16.self)))
         case 0xc6:
-            return try readData(length: Int(try readBigEndian(UInt32.self)))
+            return try readData(length: readLength32())
         default:
             offset = start
             return nil
@@ -452,7 +482,7 @@ extension MessagePackSerializer.Parser {
         case 0xd8: length = 16
         case 0xc7: length = Int(try readBigEndian(UInt8.self))
         case 0xc8: length = Int(try readBigEndian(UInt16.self))
-        case 0xc9: length = Int(try readBigEndian(UInt32.self))
+        case 0xc9: length = try readLength32()
         default:
             offset = start
             return nil
@@ -474,7 +504,7 @@ extension MessagePackSerializer.Parser {
         case 0xdc:
             return Int(try readBigEndian(UInt16.self))
         case 0xdd:
-            return Int(try readBigEndian(UInt32.self))
+            return try readLength32()
         default:
             offset = start
             return nil
@@ -494,7 +524,7 @@ extension MessagePackSerializer.Parser {
         case 0xde:
             return Int(try readBigEndian(UInt16.self))
         case 0xdf:
-            return Int(try readBigEndian(UInt32.self))
+            return try readLength32()
         default:
             offset = start
             return nil
@@ -511,9 +541,25 @@ extension MessagePackSerializer.Parser {
 
     @inlinable
     @inline(__always)
-    mutating func skipBytes(_ n: Int) throws(MessagePackError) {
-        guard count - offset >= n else { throw MessagePackError.insufficientData }
-        offset += n
+    mutating func skipBytes(_ n: Int, plus additional: Int = 0) throws(MessagePackError) {
+        let available = count - offset
+        guard n >= 0, additional >= 0, n <= available, additional <= available - n else {
+            throw MessagePackError.insufficientData
+        }
+        offset += n + additional
+    }
+
+    @inline(__always)
+    private func addPendingValues(
+        _ valueCount: Int, multiplier: Int = 1, to remaining: inout Int
+    ) throws(MessagePackError) {
+        let available = count - offset
+        guard valueCount >= 0, multiplier > 0, remaining <= available,
+            valueCount <= (available - remaining) / multiplier
+        else {
+            throw MessagePackError.insufficientData
+        }
+        remaining += valueCount * multiplier
     }
 
     /// Advances past one complete value (including nested containers) without
@@ -535,13 +581,13 @@ extension MessagePackSerializer.Parser {
             case 0xc5, 0xda:  // bin 16 / str 16
                 try skipBytes(Int(try readBigEndian(UInt16.self)))
             case 0xc6, 0xdb:  // bin 32 / str 32
-                try skipBytes(Int(try readBigEndian(UInt32.self)))
+                try skipBytes(try readLength32())
             case 0xc7:  // ext 8
                 try skipBytes(Int(try readBigEndian(UInt8.self)) + 1)
             case 0xc8:  // ext 16
                 try skipBytes(Int(try readBigEndian(UInt16.self)) + 1)
             case 0xc9:  // ext 32
-                try skipBytes(Int(try readBigEndian(UInt32.self)) + 1)
+                try skipBytes(try readLength32(), plus: 1)
             case 0xca:  // float 32
                 try skipBytes(4)
             case 0xcb:  // float 64
@@ -565,17 +611,18 @@ extension MessagePackSerializer.Parser {
             case 0xd8:  // fixext 16
                 try skipBytes(17)
             case 0x90...0x9f:  // fixarray
-                remaining += Int(format & 0x0f)
+                try addPendingValues(Int(format & 0x0f), to: &remaining)
             case 0xdc:  // array 16
-                remaining += Int(try readBigEndian(UInt16.self))
+                try addPendingValues(Int(try readBigEndian(UInt16.self)), to: &remaining)
             case 0xdd:  // array 32
-                remaining += Int(try readBigEndian(UInt32.self))
+                try addPendingValues(try readLength32(), to: &remaining)
             case 0x80...0x8f:  // fixmap
-                remaining += 2 * Int(format & 0x0f)
+                try addPendingValues(Int(format & 0x0f), multiplier: 2, to: &remaining)
             case 0xde:  // map 16
-                remaining += 2 * Int(try readBigEndian(UInt16.self))
+                try addPendingValues(
+                    Int(try readBigEndian(UInt16.self)), multiplier: 2, to: &remaining)
             case 0xdf:  // map 32
-                remaining += 2 * Int(try readBigEndian(UInt32.self))
+                try addPendingValues(try readLength32(), multiplier: 2, to: &remaining)
             default:  // 0xc1
                 throw MessagePackError.invalidFormat(format)
             }
