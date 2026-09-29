@@ -128,10 +128,15 @@ extension MessagePackTimestamp {
     /// or returns nil when the date's interval since 1970 is not finite or
     /// does not fit in the timestamp's `Int64` seconds range.
     public init?(exactly date: Date) {
-        let interval = date.timeIntervalSince1970
+        // `Date` counts from 2001. Moving that to 1970 in floating point drops
+        // the lowest bit of about half the dates from 2018 to 2035 (119 ns), so
+        // the epoch offset is added to the whole seconds as an integer instead.
+        let interval = date.timeIntervalSinceReferenceDate
         guard interval.isFinite else { return nil }
         let wholeSeconds = interval.rounded(.down)
-        guard var seconds = Int64(exactly: wholeSeconds) else { return nil }
+        guard let referenceSeconds = Int64(exactly: wholeSeconds) else { return nil }
+        guard referenceSeconds <= Int64.max - Self.epochOffset else { return nil }
+        var seconds = referenceSeconds + Self.epochOffset
         var nanoseconds = Int64(((interval - wholeSeconds) * 1_000_000_000).rounded())
         if nanoseconds >= 1_000_000_000 {
             guard seconds < Int64.max else { return nil }
@@ -142,10 +147,20 @@ extension MessagePackTimestamp {
     }
 
     /// The timestamp as a `Date`. `Date` stores less than nanosecond
-    /// precision, so the conversion may round.
+    /// precision, so the conversion may round. A `Date` more than about 97
+    /// days from 2001-01-01 round-trips through ``init(exactly:)`` unchanged.
     public var date: Date {
-        Date(timeIntervalSince1970: TimeInterval(seconds) + TimeInterval(nanoseconds) / 1_000_000_000)
+        Date(
+            timeIntervalSinceReferenceDate: TimeInterval(seconds)
+                - TimeInterval(Self.epochOffset)
+                + TimeInterval(nanoseconds) / 1_000_000_000)
     }
+
+    /// Seconds from 1970-01-01 to 2001-01-01, the reference date of `Date`.
+    ///
+    /// A literal rather than `Date.timeIntervalBetween1970AndReferenceDate`,
+    /// which is read through an out-of-line call into Foundation.
+    private static var epochOffset: Int64 { 978_307_200 }
 }
 
 extension MessagePackValue {
