@@ -113,9 +113,11 @@ struct FloatTests {
     }
 
     @Test func float64RoundTrip() throws {
+        // 1.0 fits a float 32 exactly, so the smaller format is used.
+        #expect(try serializedBytes(.float64(1.0)) == [0xca, 0x3f, 0x80, 0x00, 0x00])
         #expect(
-            try serializedBytes(.float64(1.0))
-                == [0xcb, 0x3f, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+            try serializedBytes(.float64(3.141592653589793))
+                == [0xcb, 0x40, 0x09, 0x21, 0xfb, 0x54, 0x44, 0x2d, 0x18])
         let value = MessagePackValue.float64(3.141592653589793)
         let data = try MessagePackSerializer.serialize(value: value)
         #expect(try MessagePackSerializer.deserialize(data: data) == value)
@@ -127,11 +129,7 @@ struct FloatTests {
             #expect(try MessagePackSerializer.deserialize(data: data) == .float32(value))
         }
         let nanData = try MessagePackSerializer.serialize(value: .float64(.nan))
-        guard case .float64(let decoded) = try MessagePackSerializer.deserialize(data: nanData)
-        else {
-            Issue.record("expected float64")
-            return
-        }
+        let decoded = try #require(try MessagePackSerializer.deserialize(data: nanData).doubleValue)
         #expect(decoded.isNaN)
     }
 }
@@ -416,7 +414,7 @@ struct RoundTripTests {
             .string("version"): .array([.uint8(1), .uint8(0), .uint8(0)]),
             .string("tags"): .array([.string("swift"), .string("serialization")]),
             .string("count"): .uint32(70000),
-            .string("ratio"): .float64(0.75),
+            .string("ratio"): .float32(0.75),
             .string("enabled"): .bool(true),
             .string("payload"): .binary(Data([0xde, 0xad, 0xbe, 0xef])),
             .string("meta"): .map([

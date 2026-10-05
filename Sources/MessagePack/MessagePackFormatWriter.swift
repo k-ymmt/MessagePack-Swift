@@ -90,11 +90,21 @@ extension MessagePackFormatSink {
         writeBigEndian(value.bitPattern)
     }
 
+    /// Writes a float 32 when it holds `value` exactly, bit for bit (as it
+    /// does `-0.0`, the infinities, and the default NaN), and a float 64
+    /// otherwise: the spec's serializers use the format that represents the
+    /// data in the fewest bytes, and widening a float 32 back to a double
+    /// loses no precision.
     @inlinable
     @inline(__always)
     mutating func writeDouble(_ value: Double) {
-        writeByte(0xcb)
-        writeBigEndian(value.bitPattern)
+        let narrowed = Float(value)
+        if Double(narrowed).bitPattern == value.bitPattern {
+            writeFloat(narrowed)
+        } else {
+            writeByte(0xcb)
+            writeBigEndian(value.bitPattern)
+        }
     }
 
     @inlinable

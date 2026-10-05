@@ -163,9 +163,19 @@ let person = try MessagePackDecoder().decode(Person.self, from: data)
   `MessagePackTimestamp` ↔ ext type -1. Dates that cannot be represented as
   a timestamp (non-finite, out of `Int64` seconds range) throw
   `EncodingError.invalidValue`.
-- Integers encode with the smallest wire format and decode from any integer
-  format that fits the requested type; out-of-range numbers (including
-  float64 → `Float` overflow) throw instead of truncating.
+- Integers (and doubles that a float 32 holds exactly) encode with the
+  smallest wire format; integers decode from any integer format that fits
+  the requested type; out-of-range numbers (including float64 → `Float`
+  overflow) throw instead of truncating. `Int128`/`UInt128` encode when the
+  value fits in 64 bits and throw `EncodingError.invalidValue` otherwise.
+- `Decimal`, which MessagePack has no type for, goes through its own
+  `Codable` conformance (a map of its fields) by default. As an option,
+  `MessagePackEncoder(decimalEncodingStrategy: .convertToString)` writes a
+  string of its exact digits (`"0.35"`, 5 bytes instead of about 60), and
+  `MessagePackDecoder(decimalDecodingStrategy:)` takes the set of formats a
+  `Decimal` is read from: `.deferredToDecimal` (the map, the default),
+  `.convertFromString`, `.convertFromInteger`, and `.convertFromFloat`.
+  Versions before the option cannot read the string.
 - Encoder output is byte-identical to `MessagePackSerializer.serialize` of
   the equivalent value tree (smallest headers everywhere).
 - Both coders are `Sendable` (unchecked, value-semantic — like
@@ -220,8 +230,8 @@ p50 wall clock, same fixtures as the macro table:
 
 ## Design notes
 
-- **Spec compliance**: All format families are supported (fixint, fixmap, fixarray, fixstr, nil, bool, bin 8/16/32, ext 8/16/32, float 32/64, uint/int 8–64, fixext 1–16, str 8/16/32, array 16/32, map 16/32). The reserved byte `0xc1` and invalid UTF-8 in strings are rejected. Timestamps round-trip through `.ext(type: -1, ...)`.
-- **Smallest representation**: As recommended by the spec, integers serialize with the smallest format that represents the value, regardless of the case width (`.int64(5)` encodes as a 1-byte positive fixint). Consequently, deserialization maps each wire format to the narrowest matching case (positive fixint → `.uint8`, negative fixint → `.int8`, `uint 16` → `.uint16`, …); use the `int64Value` / `uint64Value` accessors for width-agnostic reads.
+- **Spec compliance**: All format families are supported (fixint, fixmap, fixarray, fixstr, nil, bool, bin 8/16/32, ext 8/16/32, float 32/64, uint/int 8–64, fixext 1–16, str 8/16/32, array 16/32, map 16/32). The reserved byte `0xc1` and invalid UTF-8 in strings are rejected; as the spec asks, the original bytes of such a string stay readable through `MessagePackReader.readStringBytes()`. Timestamps round-trip through `.ext(type: -1, ...)`.
+- **Smallest representation**: As recommended by the spec, integers serialize with the smallest format that represents the value, regardless of the case width (`.int64(5)` encodes as a 1-byte positive fixint), and a double that a float 32 holds exactly, bit for bit (`1.5`, `-0.0`, the infinities, the default NaN), as a 5-byte float 32 rather than a 9-byte float 64 on every route. Consequently, deserialization maps each wire format to the narrowest matching case (positive fixint → `.uint8`, negative fixint → `.int8`, `uint 16` → `.uint16`, float 32 → `.float32`, …); use the `int64Value` / `uint64Value` / `doubleValue` accessors for width-agnostic reads.
 - **Iterative, not recursive**: Both directions use explicit frame stacks, so deeply nested input can never overflow the call stack. Deserialization enforces a nesting-depth limit (512) as DoS protection; serialization has no depth limit. The innermost container's state is kept in locals on both paths, so flat data never touches the stack arrays.
 - **Single-pass serialization**: One streaming pass into a growable buffer (doubling growth, so a large string/binary payload triggers at most one resize before its bulk copy), handed to `Data` without copying. Length limits (strings/binary/containers beyond 2^32-1) are still validated inline with typed throws.
 - **Zero-copy parsing**: The parser walks the raw bytes with unaligned big-endian loads; strings are built via `UTF8Span` (validate once, no revalidation) on OS 26+, falling back to `String(validating:)`. The availability check is resolved once per process, not per string.
@@ -263,4 +273,4 @@ Deserialization of a flat scalar array performs 1 allocation (the result array);
 swift test
 ```
 
-195 tests cover every format's byte-level encoding, boundary values (fixint/str/bin/array/map size class edges), Unicode, error paths (truncation, reserved bytes, invalid UTF-8, trailing bytes, depth limit), round-trip fidelity, the Codable layer (scalar extremes, nested/optional/enum/dictionary round trips, serializer interop, class inheritance via `superEncoder`, manual keyed/unkeyed/nested containers, and decoding errors), and the macro layer (expansion snapshots, round trips for every supported field type, wire-format details, decoding robustness against reordered/unknown/duplicate/hostile input, and byte-for-byte Codable interop).
+211 tests cover every format's byte-level encoding, boundary values (fixint/str/bin/array/map size class edges), Unicode, error paths (truncation, reserved bytes, invalid UTF-8, trailing bytes, depth limit), round-trip fidelity, the Codable layer (scalar extremes, nested/optional/enum/dictionary round trips, serializer interop, class inheritance via `superEncoder`, manual keyed/unkeyed/nested containers, decoding errors with byte offsets, `Decimal`, and 128-bit integers), and the macro layer (expansion snapshots, round trips for every supported field type, wire-format details, decoding robustness against reordered/unknown/duplicate/hostile input, and byte-for-byte Codable interop).

@@ -108,12 +108,29 @@ public struct MessagePackReader: ~Copyable {
         return narrowed
     }
 
+    /// Reads a string, throwing ``MessagePackError/invalidUTF8`` if its
+    /// bytes are not valid UTF-8; ``readStringBytes()`` reads them as they are.
     @inlinable
     public mutating func readString() throws(MessagePackError) -> String {
         guard let value = try parser.readRawString() else {
             throw MessagePackError.typeMismatch(expected: "string", format: try parser.peekFormat())
         }
         return value
+    }
+
+    /// Reads a string's bytes as they are on the wire, without validating
+    /// them as UTF-8.
+    ///
+    /// The spec lets a string hold an invalid byte sequence, leaves what a
+    /// deserializer does with one to the implementation (``readString()``
+    /// rejects it), and asks deserializers to give applications the original
+    /// bytes so they can decide how to handle it: this is that access.
+    @inlinable
+    public mutating func readStringBytes() throws(MessagePackError) -> Data {
+        guard let bytes = try parser.readRawStringBytes() else {
+            throw MessagePackError.typeMismatch(expected: "string", format: try parser.peekFormat())
+        }
+        return Data(buffer: bytes)
     }
 
     /// Reads a binary (bin 8/16/32) payload.

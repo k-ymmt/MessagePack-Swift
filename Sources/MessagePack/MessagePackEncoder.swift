@@ -15,6 +15,11 @@ import Foundation
 ///   throw `EncodingError.invalidValue`.
 /// - `Data` is encoded as bin 8/16/32.
 /// - ``MessagePackTimestamp`` is encoded as the timestamp extension type.
+/// - `Decimal`, which MessagePack has no type for, is encoded through its own
+///   `Codable` conformance (a map of its fields), or, with
+///   ``decimalEncodingStrategy`` set to
+///   ``DecimalEncodingStrategy/convertToString``, as a string of its exact
+///   decimal digits such as `"0.35"`.
 ///
 /// Keyed containers are encoded as maps with string keys. Because encoding is
 /// streaming, writes must be well nested: a nested container (or an encoder
@@ -29,11 +34,31 @@ import Foundation
 /// conformance: it has value semantics, but values stored in `userInfo` must
 /// themselves be `Sendable` for cross-task sharing to be safe.
 public struct MessagePackEncoder {
+    /// How `Decimal` values are written, named like `JSONEncoder`'s
+    /// strategies.
+    public enum DecimalEncodingStrategy: Sendable {
+        /// Defers to `Decimal`'s own `Codable` conformance, which writes a
+        /// map of its fields (`exponent`, `mantissa`, …). The default, and
+        /// what earlier versions wrote.
+        case deferredToDecimal
+        /// Converts to a string of the exact decimal digits (`"0.35"`): a
+        /// fraction of the map's size, and parsed by other languages' decimal
+        /// types. Decoders read it with
+        /// ``MessagePackDecoder/DecimalDecodingStrategy/convertFromString`` in
+        /// their strategy; versions before this option cannot.
+        case convertToString
+    }
+
     /// Contextual information made available to the `Encodable` types via
     /// `Encoder.userInfo`.
     public var userInfo: [CodingUserInfoKey: Any] = [:]
 
-    public init() {}
+    /// How `Decimal` values are written.
+    public var decimalEncodingStrategy: DecimalEncodingStrategy
+
+    public init(decimalEncodingStrategy: DecimalEncodingStrategy = .deferredToDecimal) {
+        self.decimalEncodingStrategy = decimalEncodingStrategy
+    }
 
     /// Encodes `value` into MessagePack binary data.
     ///
@@ -41,7 +66,7 @@ public struct MessagePackEncoder {
     /// encodes nothing, since MessagePack has no representation for "no
     /// value".
     public func encode<T: Encodable>(_ value: T) throws -> Data {
-        let impl = MessagePackEncoderImpl(userInfo: userInfo)
+        let impl = MessagePackEncoderImpl(userInfo: userInfo, decimalEncodingStrategy: decimalEncodingStrategy)
         defer { impl.tearDown() }
         try impl.encodeEncodable(value, codingPath: [])
         return impl.finalize()
@@ -132,11 +157,13 @@ final class MessagePackEncoderImpl {
     let state: UnsafeMutablePointer<MessagePackEncoderState>
     var headers: [ContainerHeader] = []
     let userInfo: [CodingUserInfoKey: Any]
+    let decimalEncodingStrategy: MessagePackEncoder.DecimalEncodingStrategy
 
-    init(userInfo: [CodingUserInfoKey: Any]) {
+    init(userInfo: [CodingUserInfoKey: Any], decimalEncodingStrategy: MessagePackEncoder.DecimalEncodingStrategy) {
         self.state = .allocate(capacity: 1)
         self.state.initialize(to: MessagePackEncoderState())
         self.userInfo = userInfo
+        self.decimalEncodingStrategy = decimalEncodingStrategy
     }
 
     /// Releases the encoding state. Must be called exactly once, after
@@ -248,6 +275,10 @@ final class MessagePackEncoderImpl {
             } else if T.self == MessagePackTimestamp.self {
                 let timestamp = raw.assumingMemoryBound(to: MessagePackTimestamp.self).pointee
                 state.pointee.buffer.writeExt(type: MessagePackTimestamp.extType, data: timestamp.data)
+            } else if decimalEncodingStrategy == .convertToString, T.self == Decimal.self {
+                // The strategy is checked first: `Decimal.self` costs a call
+                // to Foundation's metadata accessor.
+                encodeDecimal(raw)
             } else {
                 let path = codingPath()
                 let before = state.pointee.buffer.offset
@@ -264,6 +295,12 @@ final class MessagePackEncoderImpl {
                 }
             }
         }
+    }
+
+    /// Writes the `Decimal` at `value` as a string of its exact digits.
+    @inline(never)
+    private func encodeDecimal(_ value: UnsafeRawPointer) {
+        state.pointee.buffer.writeString(value.assumingMemoryBound(to: Decimal.self).pointee.description)
     }
 
     /// Writes an array of a natively represented element type with a tight

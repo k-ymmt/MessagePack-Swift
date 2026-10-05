@@ -87,6 +87,7 @@ public struct MessagePackWriter: ~Copyable {
         buffer.writeFloat(value)
     }
 
+    /// Writes a float 32 when it holds `value` exactly, else a float 64.
     @inlinable
     public mutating func write(_ value: Double) {
         buffer.writeDouble(value)

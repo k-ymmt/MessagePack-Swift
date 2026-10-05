@@ -55,14 +55,6 @@ struct CrossImplementationVectorTests {
             .int64(.min)
         ),
         (
-            "float64 1.5", [0xcb, 0x3f, 0xf8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
-            .float64(1.5)
-        ),
-        (
-            "float64 -2.5", [0xcb, 0xc0, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
-            .float64(-2.5)
-        ),
-        (
             "float64 pi", [0xcb, 0x40, 0x09, 0x21, 0xfb, 0x54, 0x44, 0x2d, 0x18],
             .float64(3.141592653589793)
         ),
@@ -101,6 +93,20 @@ struct CrossImplementationVectorTests {
         ("ext length 0", [0xc7, 0x00, 0x09], .ext(type: 9, data: Data())),
     ]
 
+    /// msgpack-python writes every float as a float 64; these hold values a
+    /// float 32 holds exactly, which this library writes as the smaller float
+    /// 32 (see `doublesUseTheSmallestFloatFormat`), so they are decode-only.
+    static let decodeOnlyVectors: [(label: String, bytes: [UInt8], value: MessagePackValue)] = [
+        (
+            "float64 1.5", [0xcb, 0x3f, 0xf8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+            .float64(1.5)
+        ),
+        (
+            "float64 -2.5", [0xcb, 0xc0, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+            .float64(-2.5)
+        ),
+    ]
+
     @Test func serializeMatchesReference() throws {
         for (label, bytes, value) in Self.vectors {
             #expect(try serializedBytes(value) == bytes, "\(label)")
@@ -108,9 +114,22 @@ struct CrossImplementationVectorTests {
     }
 
     @Test func deserializeMatchesReference() throws {
-        for (label, bytes, value) in Self.vectors {
+        for (label, bytes, value) in Self.vectors + Self.decodeOnlyVectors {
             #expect(try deserialize(bytes) == value, "\(label)")
         }
+    }
+
+    /// The spec's serializers use the format that represents the data in the
+    /// fewest bytes: a double a float 32 holds exactly is written as one, as
+    /// widening it back loses no precision; any other stays a float 64.
+    @Test func doublesUseTheSmallestFloatFormat() throws {
+        #expect(try serializedBytes(.float64(1.5)) == [0xca, 0x3f, 0xc0, 0x00, 0x00])
+        #expect(try serializedBytes(.float64(-2.5)) == [0xca, 0xc0, 0x20, 0x00, 0x00])
+        #expect(try serializedBytes(.float64(.infinity)) == [0xca, 0x7f, 0x80, 0x00, 0x00])
+        #expect(try serializedBytes(.float64(0.1)) == [0xcb, 0x3f, 0xb9, 0x99, 0x99, 0x99, 0x99, 0x99, 0x9a])
+        // Every route writes the same bytes for the same double.
+        #expect(try [UInt8](MessagePackEncoder().encode(1.5)) == [0xca, 0x3f, 0xc0, 0x00, 0x00])
+        #expect([UInt8](MessagePackSerializer.serialize(1.5)) == [0xca, 0x3f, 0xc0, 0x00, 0x00])
     }
 
     @Test func multiEntryMapDecode() throws {
@@ -303,13 +322,9 @@ struct FloatEdgeCaseTests {
         }
         #expect(f.bitPattern == (-Float.zero).bitPattern)
 
-        guard
-            case .float64(let d) = try deserialize(
-                try serializedBytes(.float64(-0.0)))
-        else {
-            Issue.record("expected float64")
-            return
-        }
+        // A double -0.0 is a float 32 -0.0, sign bit included.
+        #expect(try serializedBytes(.float64(-0.0)) == [0xca, 0x80, 0x00, 0x00, 0x00])
+        let d = try #require(try deserialize(try serializedBytes(.float64(-0.0))).doubleValue)
         #expect(d.bitPattern == (-Double.zero).bitPattern)
     }
 
@@ -333,12 +348,11 @@ struct FloatEdgeCaseTests {
             0x7ff8_0000_dead_beef,  // quiet NaN with payload
             Double.leastNonzeroMagnitude.bitPattern,  // subnormal
         ]
+        // The default NaN fits a float 32 bit for bit and is written as one;
+        // a payload or a subnormal a float 32 cannot hold stays a float 64.
         for pattern in float64Patterns {
             let value = MessagePackValue.float64(Double(bitPattern: pattern))
-            guard case .float64(let d) = try deserialize(try serializedBytes(value)) else {
-                Issue.record("expected float64")
-                return
-            }
+            let d = try #require(try deserialize(try serializedBytes(value)).doubleValue)
             #expect(d.bitPattern == pattern)
         }
     }
@@ -360,6 +374,38 @@ struct UTF8ValidationTests {
             #expect(throws: MessagePackError.invalidUTF8, "\(label)") {
                 try deserialize(bytes)
             }
+        }
+    }
+}
+
+/// "Deserializers should provide functionality to get the original byte
+/// array" of a string holding an invalid byte sequence.
+@Suite("Original string bytes")
+struct OriginalStringBytesTests {
+    private struct RawString: MessagePackSerializable {
+        let bytes: Data
+
+        func serialize(into writer: inout MessagePackWriter) {}
+
+        init(messagePack reader: inout MessagePackReader) throws(MessagePackError) {
+            bytes = try reader.readStringBytes()
+        }
+    }
+
+    @Test func invalidUTF8IsReadAsItIs() throws {
+        let invalid: [UInt8] = [0x61, 0xff, 0xfe, 0x62]
+        for header: [UInt8] in [[0xa4], [0xd9, 0x04], [0xda, 0x00, 0x04], [0xdb, 0x00, 0x00, 0x00, 0x04]] {
+            let data = Data(header + invalid)
+            #expect(throws: MessagePackError.invalidUTF8) {
+                try MessagePackSerializer.deserialize(String.self, from: data)
+            }
+            #expect(try MessagePackSerializer.deserialize(RawString.self, from: data).bytes == Data(invalid))
+        }
+    }
+
+    @Test func otherTypesAreAMismatch() throws {
+        #expect(throws: MessagePackError.typeMismatch(expected: "string", format: 0xc4)) {
+            try MessagePackSerializer.deserialize(RawString.self, from: Data([0xc4, 0x01, 0x61]))
         }
     }
 }

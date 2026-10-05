@@ -86,6 +86,16 @@ struct MessagePackDeferredSingleValueEncodingContainer: SingleValueEncodingConta
     mutating func encode(_ value: UInt32) throws { encodeUnsigned(value) }
     mutating func encode(_ value: UInt64) throws { encodeUnsigned(value) }
 
+    @available(watchOS 11.0, *)
+    mutating func encode(_ value: Int128) throws {
+        try owner.impl.encodeWideInteger(value, codingPath: owner.codingPath) { _ = begin() }
+    }
+
+    @available(watchOS 11.0, *)
+    mutating func encode(_ value: UInt128) throws {
+        try owner.impl.encodeWideInteger(value, codingPath: owner.codingPath) { _ = begin() }
+    }
+
     // The ten integer overloads differ only in the width they widen from.
     // `writeInt`/`writeUInt` then pick the smallest wire format for the
     // widened value, so widening here costs nothing on the wire.
@@ -154,6 +164,16 @@ struct MessagePackKeyedEncodingContainer<Key: CodingKey>: KeyedEncodingContainer
     mutating func encode(_ value: UInt16, forKey key: Key) throws { encodeUnsigned(value, forKey: key) }
     mutating func encode(_ value: UInt32, forKey key: Key) throws { encodeUnsigned(value, forKey: key) }
     mutating func encode(_ value: UInt64, forKey key: Key) throws { encodeUnsigned(value, forKey: key) }
+
+    @available(watchOS 11.0, *)
+    mutating func encode(_ value: Int128, forKey key: Key) throws {
+        try impl.encodeWideInteger(value, codingPath: codingPath + [key]) { beginEntry(key) }
+    }
+
+    @available(watchOS 11.0, *)
+    mutating func encode(_ value: UInt128, forKey key: Key) throws {
+        try impl.encodeWideInteger(value, codingPath: codingPath + [key]) { beginEntry(key) }
+    }
 
     // The ten integer overloads differ only in the width they widen from.
     // `writeInt`/`writeUInt` then pick the smallest wire format for the
@@ -266,6 +286,20 @@ struct MessagePackUnkeyedEncodingContainer: UnkeyedEncodingContainer {
     mutating func encode(_ value: UInt32) throws { encodeUnsigned(value) }
     mutating func encode(_ value: UInt64) throws { encodeUnsigned(value) }
 
+    @available(watchOS 11.0, *)
+    mutating func encode(_ value: Int128) throws {
+        try impl.encodeWideInteger(value, codingPath: codingPath + [MessagePackCodingKey(index: count)]) {
+            beginElement()
+        }
+    }
+
+    @available(watchOS 11.0, *)
+    mutating func encode(_ value: UInt128) throws {
+        try impl.encodeWideInteger(value, codingPath: codingPath + [MessagePackCodingKey(index: count)]) {
+            beginElement()
+        }
+    }
+
     // The ten integer overloads differ only in the width they widen from.
     // `writeInt`/`writeUInt` then pick the smallest wire format for the
     // widened value, so widening here costs nothing on the wire.
@@ -368,6 +402,16 @@ struct MessagePackSingleValueEncodingContainer: SingleValueEncodingContainer {
     mutating func encode(_ value: UInt16) throws { encodeUnsigned(value) }
     mutating func encode(_ value: UInt32) throws { encodeUnsigned(value) }
     mutating func encode(_ value: UInt64) throws { encodeUnsigned(value) }
+
+    @available(watchOS 11.0, *)
+    mutating func encode(_ value: Int128) throws {
+        try impl.encodeWideInteger(value, codingPath: codingPath) { beginValue() }
+    }
+
+    @available(watchOS 11.0, *)
+    mutating func encode(_ value: UInt128) throws {
+        try impl.encodeWideInteger(value, codingPath: codingPath) { beginValue() }
+    }
 
     // The ten integer overloads differ only in the width they widen from.
     // `writeInt`/`writeUInt` then pick the smallest wire format for the

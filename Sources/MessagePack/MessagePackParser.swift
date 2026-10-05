@@ -319,13 +319,14 @@ extension MessagePackSerializer.Parser {
         }
     }
 
-    /// Reads a float 32/64 (or, leniently, any integer) as a `Double`, or
-    /// rewinds and returns `nil`.
+    /// Reads a float 32/64 as a `Double`, or rewinds and returns `nil` if the
+    /// next value is not a float.
     @inlinable
     @inline(__always)
-    mutating func readRawDouble() throws(MessagePackError) -> Double? {
+    mutating func readRawFloat() throws(MessagePackError) -> Double? {
         let start = offset
         let format = try readFormatByte()
+
         switch format {
         case 0xca:
             return Double(Float(bitPattern: try readBigEndian(UInt32.self)))
@@ -333,11 +334,23 @@ extension MessagePackSerializer.Parser {
             return Double(bitPattern: try readBigEndian(UInt64.self))
         default:
             offset = start
-            guard let raw = try readRawInteger() else { return nil }
-            switch raw {
-            case .signed(let v): return Double(v)
-            case .unsigned(let v): return Double(v)
-            }
+            return nil
+        }
+    }
+
+    /// Reads a float 32/64 (or, leniently, any integer) as a `Double`, or
+    /// rewinds and returns `nil`.
+    @inlinable
+    @inline(__always)
+    mutating func readRawDouble() throws(MessagePackError) -> Double? {
+        if let value = try readRawFloat() {
+            return value
+        }
+
+        guard let raw = try readRawInteger() else { return nil }
+        switch raw {
+        case .signed(let v): return Double(v)
+        case .unsigned(let v): return Double(v)
         }
     }
 
