@@ -28,7 +28,7 @@ final class MessagePackKeyedStorage {
         entries = []
         searchIndex = 0
         scanned.removeAll(keepingCapacity: true)
-        scanned.reserveCapacity(entryCount)
+        scanned.reserveCapacity(Swift.min(entryCount, messagePackMaxPreallocation))
         for _ in 0..<entryCount {
             let keyOffset = parser.offset
             try parser.skipValue()

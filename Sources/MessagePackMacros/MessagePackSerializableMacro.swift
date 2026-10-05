@@ -105,26 +105,26 @@ public struct MessagePackSerializableMacro: ExtensionMacro {
     /// One stored property participating in serialization.
     private struct Field {
         /// The property name without backticks, used as the default map key.
-        var name: String
+        let name: String
         /// The map key on the wire (`@MessagePackKey` override or `name`).
-        var key: String
+        let key: String
         /// The declared type, as written.
-        var type: TypeSyntax?
+        let type: TypeSyntax?
         /// A type expression usable as `<Type>(messagePack: &reader)` and as
         /// the generic argument of the decode-storage `Optional`. Optional
         /// sugar (`T?`, `T!`, `Swift.Optional<T>`) is normalized to
         /// `Optional<T>` because sugar spellings are not valid in those
         /// positions.
-        var constructor: String?
+        let constructor: String?
         /// Whether the declared type is optional (missing fields decode as nil).
-        var isOptional: Bool
+        let isOptional: Bool
         /// The initializer expression, used for missing fields when present.
-        var defaultValue: String?
+        let defaultValue: String?
         /// False for `let` properties with an initializer, which cannot be
         /// assigned in an initializer; they are encoded but not decoded.
-        var isDecodable: Bool
+        let isDecodable: Bool
         /// The binding this field came from, for diagnostics.
-        var syntax: Syntax
+        let syntax: Syntax
     }
 
     public static func expansion(
@@ -322,8 +322,8 @@ public struct MessagePackSerializableMacro: ExtensionMacro {
 
     /// A decodable field's wire key and its case index in the decode switch.
     private struct KeyEntry {
-        var bytes: [UInt8]
-        var index: Int
+        let bytes: [UInt8]
+        let index: Int
     }
 
     /// The body of the generated `readKey(matchedBy:)` closure: a switch on
